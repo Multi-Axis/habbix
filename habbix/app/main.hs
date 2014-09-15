@@ -37,10 +37,10 @@ main = runHabbix localConn remoteConn $ do
     (cmd : args) <- liftIO getArgs
     let param = read (head args) :: Int64
     case cmd of
-        "hosts" -> runLocalDB selectHosts                               >>= liftIO . printHosts
-        "apps"  -> runLocalDB (selectHostApplications $ toSqlKey param) >>= liftIO . printApps
-        "items" -> runLocalDB (selectAppItems         $ toSqlKey param) >>= liftIO . printItems
-        "hist"  -> runLocalDB (selectHistory          $ toSqlKey param) >>= liftIO . printHists
+        "hosts"   -> runLocalDB selectHosts                               >>= liftIO . printHosts
+        "apps"    -> runLocalDB (selectHostApplications $ toSqlKey param) >>= liftIO . printApps
+        "items"   -> runLocalDB (selectAppItems         $ toSqlKey param) >>= liftIO . printItems
+        "history" -> runLocalDB (selectHistory          $ toSqlKey param) >>= liftIO . printHists
         _ -> liftIO $ putStrLn usage
 
 -- | Print host info
