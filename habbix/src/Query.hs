@@ -37,7 +37,10 @@ selectAppItems :: ApplicationId -> DB [Entity Item]
 selectAppItems aid = select . from $ \(itemapp `InnerJoin` item `InnerJoin` hist) -> do
     on (hist ^. HistoryItem ==. item ^. ItemId)
     on (itemapp ^. ItemAppItem ==. item ^. ItemId)
-    groupBy (item ^. ItemId)
+
+    -- pq8 note: in 9.4 a simple (item ^. ItemId) would be enough.
+    groupBy (item ^. ItemId, item ^. ItemHost, item ^. ItemName, item ^. ItemKey_, item ^. ItemDescription)
+
     where_ (itemapp ^. ItemAppApp ==. val aid)
     return item
 
