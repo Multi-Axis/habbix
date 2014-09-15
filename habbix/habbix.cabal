@@ -41,7 +41,9 @@ executable habbix
   hs-source-dirs:      app
   build-depends:       base
                      , habbix
+                     , text
                      , esqueleto
                      , persistent
                      , transformers
+                     , text-format
   default-language:    Haskell2010

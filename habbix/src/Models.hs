@@ -15,12 +15,14 @@
 module Models where
 
 import Data.Text (Text)
-import Data.Int
 import Database.Persist.TH
 
 import FixedE4
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
+Group sql=groups id=groupid
+    name Text
+
 Host sql=hosts id=hostid
     host Text
     status Int
@@ -28,18 +30,37 @@ Host sql=hosts id=hostid
     name Text
     deriving Show
 
+HostGroup sql=hosts_groups id=hostgroupid
+    host HostId sql=hostid
+    group GroupId sql=groupid
+    deriving Show
+
+Application sql=applications id=applicationid
+    host HostId sql=hostid
+    name Text
+    deriving Show
+
 Item sql=items id=itemid
     type Int
-    hostid HostId
+    host HostId sql=hostid
     name Text
     key_ Text
-    UniqItem hostid key_ !sql=items_1
+    description Text
+    UniqItem host key_ !sql=items_1
+    deriving Show
+
+ItemApp sql=items_applications id=itemappid
+    app ApplicationId sql=applicationid
+    item ItemId sql=itemid
     deriving Show
 
 -- Note: History has no (primary key) id in zabbix db, so we don't provide
 -- one either. So please, never @get@ this entity!
+--
+-- Note also that item column in zabbix db doesn't refer the Item table
+-- like we do for convenience.
 History
-    itemid Int64
+    item ItemId sql=itemid
     clock Int
     value FixedE4
     ns Int
