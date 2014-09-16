@@ -54,15 +54,22 @@ ItemApp sql=items_applications id=itemappid
     item ItemId sql=itemid
     deriving Show
 
--- Note: History has no (primary key) id in zabbix db, so we don't provide
--- one either. So please, never @get@ this entity!
+-- Note: History and HistoryUint have no (primary key) id's in zabbix db,
+-- so we don't provide one either. So please, never @get@ these entities!
 --
 -- Note also that item column in zabbix db doesn't refer the Item table
--- like we do for convenience.
+-- like we do for convenience. It should be disabled after a migrate.
 History
     item ItemId sql=itemid
     clock Int
     value FixedE4
+    ns Int
+    deriving Show
+
+HistoryUint sql=histroy_uint
+    item ItemId sql=itemid
+    clock Int
+    value Int -- numeric(20,0)
     ns Int
     deriving Show
 |]
