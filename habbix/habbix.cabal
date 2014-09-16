@@ -52,4 +52,6 @@ executable habbix
                      , persistent
                      , transformers
                      , text-format
+                     , aeson
+                     , bytestring
   default-language:    Haskell2010

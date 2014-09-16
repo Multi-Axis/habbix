@@ -15,6 +15,8 @@ import Query
 
 import Prelude hiding (print)
 import Data.Text.Format
+import Data.Aeson
+import qualified Data.ByteString.Lazy as B
 import Database.Esqueleto
 import Control.Monad.IO.Class
 import Control.Monad
@@ -30,6 +32,7 @@ usage = unlines
     , "apps <hostid>    List available \"metric groups\" for the host"
     , "items <appid>    List available \"metrics\" in the metric group <appid>"
     , "history <itemid> Print out <time>,<value> for the given metric <itemid>"
+    , "json-hist <itemid> History data in JSON: [ { time: epoch, val: num }, ... ]"
     ]
 
 main :: IO ()
@@ -41,6 +44,7 @@ main = runHabbix localConn remoteConn $ do
         "apps"    -> runLocalDB (selectHostApplications $ toSqlKey param) >>= liftIO . printApps
         "items"   -> runLocalDB (selectAppItems         $ toSqlKey param) >>= liftIO . printItems
         "history" -> runLocalDB (selectHistory          $ toSqlKey param) >>= liftIO . printHists
+        "json-hist" -> runLocalDB (selectHistory $ toSqlKey param) >>= liftIO . printJsonHists
         _ -> liftIO $ putStrLn usage
 
 -- | Print host info
@@ -67,3 +71,7 @@ printApps apps = do
     putStrLn " App ID | Name"
     forM_ apps $ \(Entity aid app) ->
         print "{} | {}\n" (left 7 ' ' $ fromSqlKey aid, applicationName app)
+
+-- | History data in JSON
+printJsonHists :: [(Epoch, FixedE4)] -> IO ()
+printJsonHists = B.putStrLn . encode . toJSON . map (\(t, v) -> object [ "time" .= t, "val" .= v])
