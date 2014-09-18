@@ -12,6 +12,7 @@ module Query where
 import ZabbixDB
 
 import           Data.Ratio (numerator)
+import           Data.List.HT (sliceHorizontal)
 import           Data.Maybe
 import           Control.Applicative
 import           Control.Monad
@@ -125,7 +126,7 @@ populateHistory = do
                , history ^. HistoryValue
                , history ^. HistoryNs)
 
-    runLocalDB $ insertMany_ $ map toHistory hs
+    mapM_ (runLocalDB . insertMany_ . map toHistory) $ sliceHorizontal 1000 hs
 
     -- HistoryUint
 
@@ -139,7 +140,7 @@ populateHistory = do
                , history ^. HistoryUintValue
                , history ^. HistoryUintNs)
 
-    runLocalDB $ insertMany_ $ map toHistoryUint uints
+    mapM_ (runLocalDB . insertMany_ . map toHistoryUint) $ sliceHorizontal 1000 uints
     where
         toHistory (Value i, Value c, Value v, Value n) = History i c v n
         toHistoryUint (Value i,Value c,Value v,Value n) = HistoryUint i c v n

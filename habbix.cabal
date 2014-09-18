@@ -38,6 +38,7 @@ library
                      , persistent-template   >=2.0.2.2 && <2.1
                      , persistent-postgresql >=2.0 && <2.1
                      , esqueleto             >=2.0 && <2.1
+                     , utility-ht
   if flag(pq8)
       build-depends: postgresql-libpq < 0.9
 
