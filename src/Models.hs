@@ -46,6 +46,7 @@ Item sql=items id=itemid
     name Text
     key_ Text
     description Text
+    valueType Int
     UniqItem host key_ !sql=items_1
     deriving Show
 
@@ -66,10 +67,10 @@ History
     ns Int
     deriving Show
 
-HistoryUint sql=histroy_uint
+HistoryUint sql=history_uint
     item ItemId sql=itemid
     clock Int
-    value Int -- numeric(20,0)
+    value Rational -- numeric(20,0)
     ns Int
     deriving Show
 |]

@@ -14,6 +14,7 @@
 module ZabbixDB
     ( module ZabbixDB
     , module Models
+    , ConnectionString
     ) where
 
 import Control.Applicative
@@ -23,6 +24,7 @@ import FixedE4 as ZabbixDB
 import Control.Monad.Logger
 import Control.Monad.Reader
 import Control.Monad.Trans.Control
+import Control.Monad.Trans.Resource
 import Control.Monad.Base
 import Database.Persist.Postgresql
 
@@ -33,14 +35,11 @@ data HabbixState = HabbixState
                  , remotePool :: ConnectionPool
                  }
 
-newtype Habbix a = Habbix { unHabbix :: ReaderT HabbixState (LoggingT IO) a }
-                   deriving ( Functor, Applicative, Monad, MonadIO
-                            , MonadBase IO
-                            , MonadReader HabbixState
-                            , MonadLogger)
+newtype Habbix a = Habbix { unHabbix :: ResourceT (ReaderT HabbixState (LoggingT IO)) a }
+                   deriving (Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadThrow, MonadResource, MonadReader HabbixState, MonadLogger)
 
 instance MonadBaseControl IO Habbix where
-    newtype StM Habbix a = StMHabbix { unStMHabbix :: StM (ReaderT HabbixState (LoggingT IO)) a }
+    newtype StM Habbix a = StMHabbix { unStMHabbix :: StM (ResourceT (ReaderT HabbixState (LoggingT IO))) a }
     liftBaseWith f = Habbix (liftBaseWith (\run -> f (liftM StMHabbix . run . unHabbix)))
     restoreM = Habbix . restoreM . unStMHabbix
 
@@ -61,6 +60,6 @@ runHabbix localConn remoteConn ma =
     runStderrLoggingT $
     withPostgresqlPool localConn 10 $ \lpool ->
     withPostgresqlPool remoteConn 10 $ \rpool ->
-        runReaderT (unHabbix ma) (HabbixState lpool rpool)
+        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool)
 
 -- runMigration migrateAll
