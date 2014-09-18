@@ -47,6 +47,7 @@ data Program = CLsHosts { outType :: DataOutType }
              | CLsItems { outType :: DataOutType, argid :: Int64 }
              | CLsData  { outType :: DataOutType, argid :: Int64, samples :: Int }
              | CMigrate { outType :: DataOutType }
+             | CSync    { outType :: DataOutType, syncAll :: Bool }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON deriving (Show, Data, Typeable)
@@ -65,9 +66,13 @@ prgConf = modes
                     &= help "List available \"metrics\" in the metric group App ID>"
     , CLsData   { samples = 80 &= help "Sample resolution (default 80)"
                 } &= name "ls-data" &= help "Print history data for <itemid>"
+
     , CMigrate  { } &= name "migrate-db" &= help "Create or update the local DB schema"
-    ] &= program "habbix"
-      &= verbosity
+
+    , CSync     { syncAll = False &= help "Sync every table, not just history"
+                } &= name "sync-db" &=  help "Synchronize remote db with local."
+
+    ] &= program "habbix" &= verbosity
 
 main :: IO ()
 main = do
@@ -92,6 +97,8 @@ main = do
                     in runLocalDB $ selHist >>= either (historyVectors >=> output) (historyVectors >=> output)
 
             CMigrate{..} -> runLocalDB (runMigration migrateAll)
+            CSync{..} | syncAll -> populateAll
+                     | otherwise -> populateHistory
 
 -- | Print host info
 printHosts :: [(Entity Group, Entity Host)] -> IO ()

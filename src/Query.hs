@@ -12,6 +12,8 @@ module Query where
 import ZabbixDB
 
 import           Data.Ratio (numerator)
+import           Data.Maybe
+import           Control.Applicative
 import           Control.Monad
 import           Control.Arrow
 import           Data.Conduit
@@ -21,6 +23,8 @@ import qualified Database.Persist as P
 
 valid :: IsSqlKey a => a -> Bool
 valid = (>= 0) . fromSqlKey
+
+-- * General queries
 
 -- | Select all hosts along with their groups that do /not/ belong to the
 -- Templates (groupid == 1).
@@ -90,3 +94,66 @@ selectHistory (Entity iid item) =
         unwrap (Right fxd) = Right (fxd $= CL.map (unValue *** numerator . unValue))
                                             -- only numerator because
                                             -- numeric(20,0)
+
+-- * Populate
+
+
+-- | Populate all local tables from remote.
+populateAll :: Habbix ()
+populateAll = do
+    selectRepsert ([] :: [P.Filter Group]) []
+    selectRepsert ([] :: [P.Filter Host]) []
+    selectRepsert ([] :: [P.Filter HostGroup]) []
+    selectRepsert ([] :: [P.Filter Application]) []
+    selectRepsert ([] :: [P.Filter Item]) []
+    selectRepsert ([] :: [P.Filter ItemApp]) []
+    populateHistory
+
+-- | Populate newest history data from remote not in local already.
+populateHistory :: Habbix ()
+populateHistory = do
+    
+    -- History
+
+    hmax   <- fmap g . runLocalDB . select . from $ \history ->
+        return (max_ (history ^. HistoryClock))
+
+    hs <- runRemoteDB . select . from $ \history -> do
+        where_ (history ^. HistoryClock >. val hmax)
+        return ( history ^. HistoryItem
+               , history ^. HistoryClock
+               , history ^. HistoryValue
+               , history ^. HistoryNs)
+
+    runLocalDB $ insertMany_ $ map toHistory hs
+
+    -- HistoryUint
+
+    intmax <- fmap f . runLocalDB . select . from $ \history ->
+        return (max_ (history ^. HistoryUintClock))
+
+    uints <- runRemoteDB . select . from $ \history -> do
+        where_ (history ^. HistoryUintClock >. val intmax)
+        return ( history ^. HistoryUintItem
+               , history ^. HistoryUintClock
+               , history ^. HistoryUintValue
+               , history ^. HistoryUintNs)
+
+    runLocalDB $ insertMany_ $ map toHistoryUint uints
+    where
+        toHistory (Value i, Value c, Value v, Value n) = History i c v n
+        toHistoryUint (Value i,Value c,Value v,Value n) = HistoryUint i c v n
+
+        f [(Value (Just x))] = x
+        f _                  = 0
+
+        g [(Value (Just x))] = x
+        g _                  = 0
+
+
+-- insertEntity :: Entity val -> DB ()
+repsertEntity (Entity key val) = P.repsert key val
+
+selectRepsert xs ys = do
+    xs <- runRemoteDB $ P.selectSource xs ys $$ CL.consume
+    runLocalDB $ mapM_ repsertEntity xs
