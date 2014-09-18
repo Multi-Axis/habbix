@@ -1,0 +1,11 @@
+#
+# This is a default configuration file for habbix.
+#
+# Edit it and place it in the dir you run habbix from renamed as "config.yaml".
+
+
+# Connect to zabbix database (read only)
+zabbixDatabase: "host=localhost port=5432 user=zabbix dbname=zabbix"
+
+# Connect to local database (read and write)
+localDatabase: "host=localhost port=5432 user=multi-axis dbname=multi-axis"
