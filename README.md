@@ -4,6 +4,12 @@
 
 **Note:** This requires esqueleto >= 2 which is not yet in hackage.
 
+## Static linking?
+
+Very tricky, because haskell package `postgresql-libpq` requires `pq` library
+which requires `krb5` library, and linking (recentish) `krb5` statically is
+unsupported and won't work.
+
 ## Configuration
 
 Copy the file `config.default.yaml` to `config.yaml` and edit the parameters in
