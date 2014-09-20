@@ -20,27 +20,32 @@ import Database.Persist.TH
 import FixedE4
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
-Group sql=groups id=groupid
+Group sql=groups
+    Id   sql=groupid
     name Text
 
-Host sql=hosts id=hostid
-    host Text
-    status Int
-    available Int
-    name Text
+Host sql=hosts
+    Id          sql=hostid
+    host        Text
+    status      Int
+    available   Int
+    name        Text
     deriving Show
 
-HostGroup sql=hosts_groups id=hostgroupid
+HostGroup sql=hosts_groups
+    Id              sql=hostgroupid
+    host    HostId  sql=hostid
+    group   GroupId sql=groupid
+    deriving Show
+
+Application sql=applications
+    Id          sql=applicationid
     host HostId sql=hostid
-    group GroupId sql=groupid
-    deriving Show
-
-Application sql=applications id=applicationid
-    host HostId sql=hostid
     name Text
     deriving Show
 
-Item sql=items id=itemid
+Item sql=items
+    Id          sql=itemid
     type Int
     host HostId sql=hostid
     name Text
@@ -50,9 +55,10 @@ Item sql=items id=itemid
     UniqItem host key_ !sql=items_1
     deriving Show
 
-ItemApp sql=items_applications id=itemappid
-    app ApplicationId sql=applicationid
-    item ItemId sql=itemid
+ItemApp sql=items_applications
+    Id                  sql=itemappid
+    app ApplicationId   sql=applicationid
+    item ItemId         sql=itemid
     deriving Show
 
 -- Note: History and HistoryUint have no (primary key) id's in zabbix db,
