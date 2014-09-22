@@ -34,10 +34,10 @@ library
                      , resourcet
                      , monad-logger          >=0.3 && <0.4
                      , conduit
-                     , persistent            >=2.0.4 && <2.1
-                     , persistent-template   >=2.0.4 && <2.1
-                     , persistent-postgresql >=2.0.4 && <2.1
-                     , esqueleto             >=2.0.1 && <2.1
+                     , persistent            ==2.0.4
+                     , persistent-template   ==2.0.4
+                     , persistent-postgresql ==2.0.4
+                     , esqueleto             ==2.0.1
                      , utility-ht
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
