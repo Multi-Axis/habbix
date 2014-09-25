@@ -22,12 +22,13 @@ flag old-postgresql
 library
   exposed-modules:     ZabbixDB
                      , Query
-  other-modules:       Models
+                     , Models
                      , FixedE4
-  -- other-extensions:    
+                     , Forecast
   build-depends:       base                  >=4.5 && <4.8
                      , text                  >=0.11 && <1.2
                      , bytestring
+                     , vector
                      , unordered-containers  >=0.2 && <0.3
                      , mtl                   >=2.0 && <3.0
                      , transformers-base
@@ -63,3 +64,8 @@ executable habbix
                      , aeson
                      , bytestring
   default-language:    Haskell2010
+
+executable linreg
+   main-is:            linreg.hs
+   hs-source-dirs:     app
+   build-depends:      base, habbix, vector
