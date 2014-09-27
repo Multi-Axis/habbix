@@ -15,21 +15,21 @@ module Main where
 
 import ZabbixDB
 import Query
+import Future
 
 import           Prelude hiding (print)
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Text (pack)
 import           Data.Text.Format
-import           Data.Text.Encoding (encodeUtf8)
+import           Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import           Data.Aeson
 import qualified Data.Yaml as Yaml
 import qualified Data.ByteString.Lazy.Char8 as BLC
-import           Data.Conduit
-import qualified Data.Conduit.List as CL
 import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as U
 import           Database.Esqueleto
+import qualified Database.Persist as P
 import           System.Console.CmdArgs
 
 data Config = Config
@@ -48,6 +48,10 @@ data Program = CLsHosts { outType :: DataOutType }
              | CLsData  { outType :: DataOutType, argid :: Int64, samples :: Int }
              | CMigrate { outType :: DataOutType }
              | CSync    { outType :: DataOutType, syncAll :: Bool }
+             | CLsModels { outType :: DataOutType }
+             | CLsFuture { outType :: DataOutType }
+             | CAddModel { outType :: DataOutType, executable :: String }
+             | NewFuture { outType :: DataOutType, argid :: Int64, model :: Int64 }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON deriving (Show, Data, Typeable)
@@ -70,19 +74,30 @@ prgConf = modes
     , CMigrate  { } &= name "migrate-db" &= help "Create or update the local DB schema"
 
     , CSync     { syncAll = False &= help "Sync every table, not just history"
-                } &= name "sync-db" &=  help "Synchronize remote db with local."
+                } &= name "sync-db" &=  help "Synchronize remote db with local and run futures"
+
+    , CLsModels { } &= name "ls-models" &= help "List available future models"
+
+    , CLsFuture { } &= name "ls-future" &= help "List all item futures"
+
+    , CAddModel { executable = def &= argPos 0 &= typ "FILENAME"
+                } &= name "add-model" &= help "Register a model named FILENAME in forecast_models"
+
+    , NewFuture { model = def &= argPos 1 &= typ "MODELID"
+                } &= name "new-future" &= help "Add future with MODELID for ITEMID"
 
     ] &= program "habbix" &= verbosity
 
 main :: IO ()
 main = do
-    prg         <- cmdArgs prgConf
     Just config <- Yaml.decodeFile "config.yaml"
+    prg         <- cmdArgs prgConf
+    debugSql    <- isLoud
 
-    runHabbix (localDatabase config) (zabbixDatabase config) $ do
+    runHabbix debugSql (localDatabase config) (zabbixDatabase config) $ do
 
         let selHist = do item <- getJust (toSqlKey $ argid prg)
-                         return . selectHistory $ Entity (toSqlKey $ argid prg) item
+                         return $ selectHistory (toSqlKey $ argid prg) (itemValueType item)
 
         case prg of
             CLsHosts{..} -> runLocalDB selectHosts >>= liftIO . printHosts
@@ -97,8 +112,36 @@ main = do
                     in runLocalDB $ selHist >>= either (historyVectors >=> output) (historyVectors >=> output)
 
             CMigrate{..} -> runLocalDB (runMigration migrateAll)
-            CSync{..} | syncAll -> populateAll
-                     | otherwise -> populateHistory
+
+            CSync{..} -> do
+                when syncAll populateZabbixParts
+                populateHistory
+                executeFutures
+
+            CLsModels{..} -> runLocalDB (P.selectList [] []) >>= liftIO . printFutureModels
+
+            CLsFuture{..} -> runLocalDB (P.selectList [] []) >>= liftIO . printItemFutures
+
+            CAddModel{..} -> runLocalDB $ P.insert_ $ FutureModel (pack executable)
+
+            NewFuture{..} -> runLocalDB $ P.insert_ $ ItemFuture (toSqlKey argid) (toSqlKey model) "{}"
+
+-- | Print model info
+printFutureModels :: [Entity FutureModel] -> IO ()
+printFutureModels models = do
+    putStrLn " ID  | Name"
+    forM_ models $ \(Entity key model) ->
+        print "{} | {}\n" (fromSqlKey key, futureModelName model)
+
+printItemFutures :: [Entity ItemFuture] -> IO ()
+printItemFutures futs = do
+    putStrLn " ItemId | modelId | params "
+    forM_ futs $ \(Entity _ fut) ->
+        print "{} | {} | {}\n"
+            ( fromSqlKey $ itemFutureItem fut
+            , fromSqlKey $ itemFutureModel fut
+            , decodeUtf8 $ itemFutureParams fut
+            )
 
 -- | Print host info
 printHosts :: [(Entity Group, Entity Host)] -> IO ()
@@ -130,27 +173,22 @@ printApps apps = do
 
 -- | Print a history item <epoch>,<value>
 printHists :: (MonadIO m, Show n) => Points n -> m ()
-printHists (ts, vs) = zipWithM_ (\t v -> print "{} {}\n" (t, show v)) (U.toList ts) (V.toList vs)
+printHists (ts, vs) = zipWithM_ (\t v -> print "{} {}\n" (t, show v)) (V.toList ts) (V.toList vs)
 
 -- | History data in JSON
 printJsonHists :: (MonadIO m, ToJSON n) => Points n -> m ()
 printJsonHists (ts, vs) =
     liftIO . BLC.putStrLn . encode . toJSON
-    $ zipWith (\t v -> object [ "time" .= t, "val" .= v]) (U.toList ts) (V.toList vs)
+    $ zipWith (\t v -> object [ "time" .= t, "val" .= v]) (V.toList ts) (V.toList vs)
     
 
 -- History stuff
 
-type Points n = (U.Vector Epoch, V.Vector n)
-
-historyVectors :: DPS n -> DB (Points n)
-historyVectors src = do
-    xs <- src $$ CL.consume
-    return (U.fromList (map fst xs), V.fromList (map snd xs))
-
 -- | Sample of n evenly leaning towards end.
 sampled :: Int -> Points n -> Points n
 sampled n (ts, vs) =
-    let interval = fromIntegral (U.length ts) / fromIntegral n
-        in ( U.generate n $ \i -> ts U.! (floor $ (fromIntegral i + 1) * interval - 1)
-           , V.generate n $ \i -> vs V.! (floor $ (fromIntegral i + 1) * interval - 1) )
+    let interval   = fromIntegral (V.length ts) / fromIntegral n :: Double
+        getIndex i = floor ((fromIntegral i + 1) * interval - 1)
+        in ( V.generate n $ \i -> ts V.! getIndex i
+           , V.generate n $ \i -> vs V.! getIndex i
+           )
