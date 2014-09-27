@@ -13,8 +13,6 @@ import ZabbixDB
 
 import           Data.Ratio (numerator)
 import           Data.List.HT (sliceHorizontal)
-import           Data.Maybe
-import           Control.Applicative
 import           Control.Monad
 import           Control.Arrow
 import           Data.Conduit
@@ -70,9 +68,9 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 type DPS val = Source DB (Epoch, val)
 
 -- | Get all history for given item.
-selectHistory :: Entity Item -> Either (DPS FixedE4) (DPS Integer)
-selectHistory (Entity iid item) =
-    unwrap $ case itemValueType item of
+selectHistory :: Key Item -> Int -> Either (DPS FixedE4) (DPS Integer)
+selectHistory iid vtype =
+    unwrap $ case vtype of
 
         0 -> Left . selectSource . from $ \history -> do
             where_ $ history ^. HistoryItem ==. val iid
@@ -80,7 +78,6 @@ selectHistory (Entity iid item) =
             return (history ^. HistoryClock, history ^. HistoryValue)
 
         1 -> error "selectHistory: historyString not implemented"
-
         2 -> error "selectHistory: What the f*ck is value_type = 2?"
 
         3 -> Right . selectSource . from $ \histUint -> do
@@ -109,20 +106,24 @@ populateZabbixParts = do
     selectRepsert ([] :: [P.Filter Application]) []
     selectRepsert ([] :: [P.Filter Item]) []
     selectRepsert ([] :: [P.Filter ItemApp]) []
+    where
+        selectRepsert xs ys          = runRemoteDB (P.selectSource xs ys $$ CL.consume)
+                                        >>= runLocalDB . mapM_ repsertEntity
+        repsertEntity (Entity key v) = P.repsert key v
 
 -- | Fetch zabbix history data (from remote to local) for all items present
 -- in the managed_item table.
 populateHistory :: Habbix ()
 populateHistory = do
-    items <- runLocalDB . select . from $ \(items `InnerJoin` manitems) -> do
-        on (items ^. ItemId ==. manitems ^. ManagedItemItem)
+    items <- runLocalDB . selectDistinct . from $ \(items `InnerJoin` itemfuture) -> do
+        on (items ^. ItemId ==. itemfuture ^. ItemFutureItem)
         return (items ^. ItemId, items ^. ItemValueType)
 
     forM_ items $ \(Value iid, Value vtype) ->
         case vtype of
             -- history
             0 -> do
-                hmax <- fmap f . runLocalDB . select . from $ \history -> do
+                hmax <- fmap unvalueFirst . runLocalDB . select . from $ \history -> do
                     where_ (history ^. HistoryItem ==. val iid)
                     return (max_ (history ^. HistoryClock))
 
@@ -137,7 +138,7 @@ populateHistory = do
 
             -- history_uint
             3 -> do
-                intmax <- fmap g . runLocalDB . select . from $ \history -> do
+                intmax <- fmap unvalueFirst . runLocalDB . select . from $ \history -> do
                     where_ (history ^. HistoryUintItem ==. val iid)
                     return (max_ (history ^. HistoryUintClock))
 
@@ -149,20 +150,10 @@ populateHistory = do
                            , history ^. HistoryUintNs)
 
                 mapM_ (runLocalDB . insertMany_ . map toHistoryUint) $ sliceHorizontal 1000 uints
+            _ -> error "Uknown value_type"
     where
         toHistory (Value i, Value c, Value v, Value n) = History i c v n
         toHistoryUint (Value i,Value c,Value v,Value n) = HistoryUint i c v n
 
-        f [(Value (Just x))] = x
-        f _                  = 0
-
-        g [(Value (Just x))] = x
-        g _                  = 0
-
-
--- repsertEntity :: Entity val -> DB ()
-repsertEntity (Entity key val) = P.repsert key val
-
-selectRepsert xs ys = do
-    xs <- runRemoteDB $ P.selectSource xs ys $$ CL.consume
-    runLocalDB $ mapM_ repsertEntity xs
+        unvalueFirst [Value (Just x)] = x
+        unvalueFirst _                = 0

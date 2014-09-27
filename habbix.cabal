@@ -25,12 +25,14 @@ library
                      , Models
                      , FixedE4
                      , Forecast
+                     , Future
   build-depends:       base                  >=4.5 && <4.8
                      , text                  >=0.11 && <1.2
                      , bytestring
                      , vector
                      , unordered-containers  >=0.2 && <0.3
                      , mtl                   >=2.0 && <3.0
+                     , transformers
                      , transformers-base
                      , monad-control
                      , resourcet
@@ -41,6 +43,8 @@ library
                      , persistent-postgresql ==2.0.4
                      , esqueleto             ==2.0.1
                      , utility-ht
+                     , process
+                     , aeson
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
 
@@ -68,4 +72,4 @@ executable habbix
 executable linreg
    main-is:            linreg.hs
    hs-source-dirs:     app
-   build-depends:      base, habbix, vector
+   build-depends:      base, habbix, vector, aeson, bytestring

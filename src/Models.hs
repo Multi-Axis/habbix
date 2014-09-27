@@ -84,30 +84,26 @@ HistoryUint sql=history_uint
 
 -- NOT in Zabbix
 
--- History data is updated only for items in this table.
-ManagedItem
-    item        ItemId
-    UniqueManaged item
-
 FutureModel
-    Id                          sql=modelid
     name        Text
     UniqueFutureModel name
     deriving Show
 
+-- History data is updated only for items in this table.
 ItemFuture
     item        ItemId          sql=itemid
     model       FutureModelId   sql=modelid
     params      ByteString
-    valueType   Int
     deriving Show
 
+-- wrt history
 Future
     item        ItemFutureId    sql=itemid
     clock       Int
     value       FixedE4
     deriving Show
 
+-- wrt history_uint
 FutureUint
     item        ItemFutureId    sql=itemid
     clock       Int

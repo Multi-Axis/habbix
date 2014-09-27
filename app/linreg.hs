@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 ------------------------------------------------------------------------------
 -- | 
 -- Module         : Main (linreg.hs)
@@ -9,13 +11,23 @@
 ------------------------------------------------------------------------------
 module Main where
 
-import qualified Data.Vector as V
-import System.IO
 import Forecast
+import Future
+
+import Control.Applicative
+import Data.Aeson
+import Data.Monoid
+import qualified Data.Vector as V
+import qualified Data.ByteString.Lazy.Char8 as C
 
 main :: IO ()
 main = do
-    input <- getContents
-    let (xs, ys) = unzip $ map read $ lines input :: ([Double], [Double])
-        (a, b)   = simpleLinearRegression (V.fromList xs) (V.fromList ys)
-    print (a, b)
+    Just Event{..} <- decode <$> C.getContents
+
+    let (a, b) = simpleLinearRegression (V.map fromIntegral evClocks) evValues
+        aday   = 60 * 60 * 24
+        clocks = V.iterateN 7 (+ aday) (V.last evClocks)
+        values = V.map (\x -> a * fromIntegral x + b) clocks
+        res    = Result clocks values mempty
+
+    C.putStrLn (encode res)

@@ -21,7 +21,7 @@ simpleLinearRegression xs ys = (a, b)
         b = mean_y - a * mean_x
 
         cov_xy = V.sum (V.zipWith (*) xs ys) / num_x
-        var_x  = V.sum (V.map (\x -> (x - mean_x) ^ 2) xs)
+        var_x  = V.sum (V.map (\x -> (x - mean_x) ^ (2 :: Int)) xs)
 
         mean_x = V.sum xs / num_x
         mean_y = V.sum ys / num_y
