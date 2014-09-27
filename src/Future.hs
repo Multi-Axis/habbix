@@ -64,13 +64,15 @@ executeFutures = do
                )
 
     forM_ itemIds $ \(Value itemid, Value params, Value vtype, Value futureid, Value model) -> do
+
+        liftIO $ putStrLn $ "Running predictions for item " ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+
         (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
                                         (historyVectors >=> return . second (V.map fromIntegral))
                                $ selectHistory itemid vtype
         let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
         runModel model ev
             >>= maybe (error "Model returned Nothing") (runLocalDB . replaceFuture futureid vtype)
-
 
 historyVectors :: DPS n -> DB (Points n)
 historyVectors src = do

@@ -131,16 +131,17 @@ printFutureModels :: [Entity FutureModel] -> IO ()
 printFutureModels models = do
     putStrLn " ID  | Name"
     forM_ models $ \(Entity key model) ->
-        print "{} | {}" (fromSqlKey key, futureModelName model)
+        print "{} | {}\n" (fromSqlKey key, futureModelName model)
 
 printItemFutures :: [Entity ItemFuture] -> IO ()
 printItemFutures futs = do
     putStrLn " ItemId | modelId | params "
     forM_ futs $ \(Entity _ fut) ->
-        print "{} | {} | {}" ( fromSqlKey $ itemFutureItem fut
-                             , fromSqlKey $ itemFutureModel fut
-                             , decodeUtf8 $ itemFutureParams fut
-                             )
+        print "{} | {} | {}\n"
+            ( fromSqlKey $ itemFutureItem fut
+            , fromSqlKey $ itemFutureModel fut
+            , decodeUtf8 $ itemFutureParams fut
+            )
 
 -- | Print host info
 printHosts :: [(Entity Group, Entity Host)] -> IO ()

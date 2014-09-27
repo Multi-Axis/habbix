@@ -95,7 +95,6 @@ selectHistory iid vtype =
 
 -- * Populate
 
-
 -- | Fetch zabbix data (from remote to local) for all zabbix-tables except
 -- history and history_uint.
 populateZabbixParts :: Habbix ()
@@ -128,7 +127,7 @@ populateHistory = do
                     return (max_ (history ^. HistoryClock))
 
                 hs <- runRemoteDB . select . from $ \history -> do
-                    where_ (history ^. HistoryClock >. val hmax)
+                    where_ (history ^. HistoryClock >. val hmax &&. history ^. HistoryItem ==. val iid)
                     return ( history ^. HistoryItem
                            , history ^. HistoryClock
                            , history ^. HistoryValue
@@ -143,7 +142,7 @@ populateHistory = do
                     return (max_ (history ^. HistoryUintClock))
 
                 uints <- runRemoteDB . select . from $ \history -> do
-                    where_ (history ^. HistoryUintClock >. val intmax)
+                    where_ (history ^. HistoryUintClock >. val intmax &&. history ^. HistoryUintItem ==. val iid)
                     return ( history ^. HistoryUintItem
                            , history ^. HistoryUintClock
                            , history ^. HistoryUintValue
