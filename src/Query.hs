@@ -99,48 +99,56 @@ selectHistory (Entity iid item) =
 -- * Populate
 
 
--- | Populate all local tables from remote.
-populateAll :: Habbix ()
-populateAll = do
+-- | Fetch zabbix data (from remote to local) for all zabbix-tables except
+-- history and history_uint.
+populateZabbixParts :: Habbix ()
+populateZabbixParts = do
     selectRepsert ([] :: [P.Filter Group]) []
     selectRepsert ([] :: [P.Filter Host]) []
     selectRepsert ([] :: [P.Filter HostGroup]) []
     selectRepsert ([] :: [P.Filter Application]) []
     selectRepsert ([] :: [P.Filter Item]) []
     selectRepsert ([] :: [P.Filter ItemApp]) []
-    populateHistory
 
--- | Populate newest history data from remote not in local already.
+-- | Fetch zabbix history data (from remote to local) for all items present
+-- in the managed_item table.
 populateHistory :: Habbix ()
 populateHistory = do
-    
-    -- History
+    items <- runLocalDB . select . from $ \(items `InnerJoin` manitems) -> do
+        on (items ^. ItemId ==. manitems ^. ManagedItemItem)
+        return (items ^. ItemId, items ^. ItemValueType)
 
-    hmax   <- fmap g . runLocalDB . select . from $ \history ->
-        return (max_ (history ^. HistoryClock))
+    forM_ items $ \(Value iid, Value vtype) ->
+        case vtype of
+            -- history
+            0 -> do
+                hmax <- fmap f . runLocalDB . select . from $ \history -> do
+                    where_ (history ^. HistoryItem ==. val iid)
+                    return (max_ (history ^. HistoryClock))
 
-    hs <- runRemoteDB . select . from $ \history -> do
-        where_ (history ^. HistoryClock >. val hmax)
-        return ( history ^. HistoryItem
-               , history ^. HistoryClock
-               , history ^. HistoryValue
-               , history ^. HistoryNs)
+                hs <- runRemoteDB . select . from $ \history -> do
+                    where_ (history ^. HistoryClock >. val hmax)
+                    return ( history ^. HistoryItem
+                           , history ^. HistoryClock
+                           , history ^. HistoryValue
+                           , history ^. HistoryNs)
 
-    mapM_ (runLocalDB . insertMany_ . map toHistory) $ sliceHorizontal 1000 hs
+                mapM_ (runLocalDB . insertMany_ . map toHistory) $ sliceHorizontal 1000 hs
 
-    -- HistoryUint
+            -- history_uint
+            3 -> do
+                intmax <- fmap g . runLocalDB . select . from $ \history -> do
+                    where_ (history ^. HistoryUintItem ==. val iid)
+                    return (max_ (history ^. HistoryUintClock))
 
-    intmax <- fmap f . runLocalDB . select . from $ \history ->
-        return (max_ (history ^. HistoryUintClock))
+                uints <- runRemoteDB . select . from $ \history -> do
+                    where_ (history ^. HistoryUintClock >. val intmax)
+                    return ( history ^. HistoryUintItem
+                           , history ^. HistoryUintClock
+                           , history ^. HistoryUintValue
+                           , history ^. HistoryUintNs)
 
-    uints <- runRemoteDB . select . from $ \history -> do
-        where_ (history ^. HistoryUintClock >. val intmax)
-        return ( history ^. HistoryUintItem
-               , history ^. HistoryUintClock
-               , history ^. HistoryUintValue
-               , history ^. HistoryUintNs)
-
-    mapM_ (runLocalDB . insertMany_ . map toHistoryUint) $ sliceHorizontal 1000 uints
+                mapM_ (runLocalDB . insertMany_ . map toHistoryUint) $ sliceHorizontal 1000 uints
     where
         toHistory (Value i, Value c, Value v, Value n) = History i c v n
         toHistoryUint (Value i,Value c,Value v,Value n) = HistoryUint i c v n
@@ -152,7 +160,7 @@ populateHistory = do
         g _                  = 0
 
 
--- insertEntity :: Entity val -> DB ()
+-- repsertEntity :: Entity val -> DB ()
 repsertEntity (Entity key val) = P.repsert key val
 
 selectRepsert xs ys = do

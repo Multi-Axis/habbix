@@ -70,16 +70,17 @@ prgConf = modes
     , CMigrate  { } &= name "migrate-db" &= help "Create or update the local DB schema"
 
     , CSync     { syncAll = False &= help "Sync every table, not just history"
-                } &= name "sync-db" &=  help "Synchronize remote db with local."
+                } &= name "sync-db" &=  help "Synchronize remote db with local and run futures"
 
     ] &= program "habbix" &= verbosity
 
 main :: IO ()
 main = do
-    prg         <- cmdArgs prgConf
     Just config <- Yaml.decodeFile "config.yaml"
+    prg         <- cmdArgs prgConf
+    debugSql    <- isLoud
 
-    runHabbix (localDatabase config) (zabbixDatabase config) $ do
+    runHabbix debugSql (localDatabase config) (zabbixDatabase config) $ do
 
         let selHist = do item <- getJust (toSqlKey $ argid prg)
                          return . selectHistory $ Entity (toSqlKey $ argid prg) item
@@ -97,8 +98,10 @@ main = do
                     in runLocalDB $ selHist >>= either (historyVectors >=> output) (historyVectors >=> output)
 
             CMigrate{..} -> runLocalDB (runMigration migrateAll)
-            CSync{..} | syncAll -> populateAll
-                     | otherwise -> populateHistory
+            CSync{..} -> do
+                when syncAll populateZabbixParts
+                populateHistory
+                {- executeFutures -}
 
 -- | Print host info
 printHosts :: [(Entity Group, Entity Host)] -> IO ()

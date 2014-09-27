@@ -33,11 +33,14 @@ import Models
 data HabbixState = HabbixState
                  { localPool :: ConnectionPool
                  , remotePool :: ConnectionPool
+                 , logSql :: Bool
                  }
 
 newtype Habbix a = Habbix { unHabbix :: ResourceT (ReaderT HabbixState (LoggingT IO)) a }
                    deriving (Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadThrow, MonadResource, MonadReader HabbixState, MonadLogger)
 
+-- This is just a mechanical MonadBaseControl instance, albeit rather
+-- tricky to grasp. Without the associated type ghc would derive this too :)
 instance MonadBaseControl IO Habbix where
     newtype StM Habbix a = StMHabbix { unStMHabbix :: StM (ResourceT (ReaderT HabbixState (LoggingT IO))) a }
     liftBaseWith f = Habbix (liftBaseWith (\run -> f (liftM StMHabbix . run . unHabbix)))
@@ -55,11 +58,12 @@ runLocalDB m = asks localPool >>= runSqlPool m
 runRemoteDB :: SqlPersistT Habbix a -> Habbix a
 runRemoteDB m = asks remotePool >>= runSqlPool m
 
-runHabbix :: ConnectionString -> ConnectionString -> Habbix a -> IO a
-runHabbix localConn remoteConn ma =
-    runStderrLoggingT $
+-- | @runHabbix debugsql local remote action@
+runHabbix :: Bool -> ConnectionString -> ConnectionString -> Habbix a -> IO a
+runHabbix isloud localConn remoteConn ma =
+    (if isloud then runStderrLoggingT else flip runLoggingT noopLog) $
     withPostgresqlPool localConn 10 $ \lpool ->
     withPostgresqlPool remoteConn 10 $ \rpool ->
-        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool)
-
--- runMigration migrateAll
+        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool isloud)
+        where
+            noopLog _ _ _ _ = return ()
