@@ -43,8 +43,8 @@ data Result = Result
             , reDetails :: Object
             }
 
-$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 4 } ''Event)
-$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 4 } ''Result)
+$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Event)
+$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Result)
 
 type Points n = (V.Vector Epoch, V.Vector n)
 
