@@ -20,8 +20,8 @@ simpleLinearRegression xs ys = (a, b)
         a = cov_xy / var_x
         b = mean_y - a * mean_x
 
-        cov_xy = V.sum (V.zipWith (*) xs ys) / num_x
-        var_x  = V.sum (V.map (\x -> (x - mean_x) ^ (2 :: Int)) xs)
+        cov_xy = (V.sum (V.zipWith (*) xs ys) / num_x) - mean_x * mean_y
+        var_x  = V.sum (V.map (\x -> (x - mean_x) ^ (2 :: Int)) xs) / num_x
 
         mean_x = V.sum xs / num_x
         mean_y = V.sum ys / num_y
