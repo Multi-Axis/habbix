@@ -84,6 +84,7 @@ HistoryUint sql=history_uint
 
 -- NOT in Zabbix
 
+-- Discovering binaries in ./future_models/<name>
 FutureModel
     name        Text
     UniqueFutureModel name
@@ -108,5 +109,11 @@ FutureUint
     item        ItemFutureId    sql=itemid
     clock       Int
     value       Rational
+    deriving Show
+
+Threshold
+    item        ItemFutureId    sql=itemid
+    lower       Bool
+    value       Double
     deriving Show
 |]
