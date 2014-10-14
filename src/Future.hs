@@ -31,17 +31,22 @@ import           Database.Esqueleto
 import qualified Database.Persist as P
 import           System.Process (readProcess)
 
-data Event = Event
+data Event params = Event
            { evValueType :: Int
            , evClocks :: V.Vector Epoch
            , evValues :: V.Vector Double
-           , evParams :: Object
+           , evParams :: params
            }
-data Result = Result
+
+data Result details = Result
             { reClocks :: V.Vector Epoch
             , reValues :: V.Vector Double
-            , reDetails :: Object
+            , reDetails :: details
             }
+
+-- As encoded in DB
+type Event'  = Event Object
+type Result' = Result Object
 
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Event)
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Result)
@@ -81,14 +86,14 @@ historyVectors src = do
 
 -- | Execute forecast model named @name@ in @forecast_models/<name>@ with
 -- given event and return result.
-runModel :: Text -> Event -> Habbix (Maybe Result)
+runModel :: Text -> Event' -> Habbix (Maybe Result')
 runModel name ev = do
     let filename = "forecast_models/" ++ unpack name
     res <- liftIO $ readProcess filename [] (unpack $ decodeUtf8 $ toStrict $ encode ev)
     return . decodeStrict' . encodeUtf8 $ pack res
 
 -- | replaces the future with given result.
-replaceFuture :: Key ItemFuture -> Int -> Result -> DB ()
+replaceFuture :: Key ItemFuture -> Int -> Result' -> DB ()
 replaceFuture futid 0 Result{..} = do
     delete . from $ \fut -> where_ (fut ^. FutureItem ==. val futid)
     P.insertMany_ $ V.toList $ V.zipWith (\c v -> Future futid c (realToFrac v)) reClocks reValues

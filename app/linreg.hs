@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 ------------------------------------------------------------------------------
 -- | 
@@ -11,23 +12,40 @@
 ------------------------------------------------------------------------------
 module Main where
 
+import ZabbixDB (Epoch)
 import Forecast
 import Future
 
 import Control.Applicative
 import Data.Aeson
+import Data.Aeson.TH
 import Data.Monoid
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy.Char8 as C
+
+type Ev = Event Params
+
+data Params = Params
+            { stopLower :: Maybe Epoch
+            , stopUpper :: Maybe Epoch
+            }
+
+data Details = Details
+             { determination :: Double }
+
+$(deriveJSON defaultOptions ''Params)
+$(deriveJSON defaultOptions ''Details)
 
 main :: IO ()
 main = do
     Just Event{..} <- decode <$> C.getContents
 
-    let (a, b) = simpleLinearRegression (V.map fromIntegral evClocks) evValues
-        aday   = 60 * 60 * 24
+    let xs     = stopLower evParams
+        (a, b) = simpleLinearRegression (fromIntegral <$> evClocks) evValues
         clocks = V.iterateN 7 (+ aday) (V.last evClocks)
-        values = V.map (\x -> a * fromIntegral x + b) clocks
-        res    = Result clocks values mempty
+        values = (\x -> a * fromIntegral x + b) <$> clocks
+        res    = Result clocks values $ Details 0 -- TODO details
 
     C.putStrLn (encode res)
+  where
+    aday = 60 * 60 * 24
