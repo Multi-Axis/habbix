@@ -40,12 +40,17 @@ main :: IO ()
 main = do
     Just Event{..} <- decode <$> C.getContents
 
-    let xs     = stopLower evParams
-        (a, b) = simpleLinearRegression (fromIntegral <$> evClocks) evValues
-        clocks = V.iterateN 7 (+ aday) (V.last evClocks)
-        values = (\x -> a * fromIntegral x + b) <$> clocks
-        res    = Result clocks values $ Details 0 -- TODO details
+    let (clocks, values) = V.unzip $
+                 maybe id (\s -> V.takeWhile ((< s) . fst)) (stopUpper evParams) $
+                 maybe id (\s -> V.dropWhile ((< s) . fst)) (stopLower evParams) $
+                 V.zip evClocks evValues
 
+        (a, b)  = simpleLinearRegression (fromIntegral <$> clocks) values
+        res     = Result
+                { reClocks  = V.iterateN 7 (+ aday) (V.last clocks)
+                , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
+                , reDetails = Details 0 -- TODO
+                }
     C.putStrLn (encode res)
   where
     aday = 60 * 60 * 24
