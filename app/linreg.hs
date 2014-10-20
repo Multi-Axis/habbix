@@ -26,12 +26,11 @@ import qualified Data.ByteString.Lazy.Char8 as C
 type Ev = Event Params
 
 data Params = Params
-            { stopLower :: Maybe Epoch
-            , stopUpper :: Maybe Epoch
+            { preFilter :: Maybe Bool
             }
 
 data Details = Details
-             { determination :: Double }
+             { r2det :: Double }
 
 $(deriveJSON defaultOptions ''Params)
 $(deriveJSON defaultOptions ''Details)
@@ -39,18 +38,15 @@ $(deriveJSON defaultOptions ''Details)
 main :: IO ()
 main = do
     Just Event{..} <- decode <$> C.getContents
+    let Params{..} = evParams
 
-    let (clocks, values) = V.unzip $
-                 maybe id (\s -> V.takeWhile ((< s) . fst)) (stopUpper evParams) $
-                 maybe id (\s -> V.dropWhile ((< s) . fst)) (stopLower evParams) $
-                 V.zip evClocks evValues
+    let (a, b, r2) = simpleLinearRegression (fromIntegral <$> evClocks) evValues
 
-        (a, b)  = simpleLinearRegression (fromIntegral <$> clocks) values
-        res     = Result
-                { reClocks  = V.iterateN 7 (+ aday) (V.last clocks)
-                , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
-                , reDetails = Details 0 -- TODO
-                }
+    let details = Details { r2det = r2 }
+        res     = Result  { reClocks  = V.iterateN 7 (+ aday) (V.last evClocks)
+                          , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
+                          , reDetails = details
+                          }
     C.putStrLn (encode res)
   where
     aday = 60 * 60 * 24

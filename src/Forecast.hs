@@ -12,10 +12,11 @@ module Forecast where
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
--- | `simpleLinearRegression xs ys` gives (a, b) for the line
+-- | `simpleLinearRegression xs ys` gives (a, b, r2) for the line
 -- y = a * x + b.
-simpleLinearRegression :: Fractional n => Vector n -> Vector n -> (n, n)
-simpleLinearRegression xs ys = (a, b)
+simpleLinearRegression :: Fractional n => Vector n -> Vector n
+                       -> (n, n, n)
+simpleLinearRegression xs ys = (a, b, r2)
     where
         a = cov_xy / var_x
         b = mean_y - a * mean_x
@@ -28,3 +29,8 @@ simpleLinearRegression xs ys = (a, b)
 
         num_x = fromIntegral (V.length xs)
         num_y = fromIntegral (V.length ys)
+
+        r2     = 1 - ss_res / ss_tot
+        ss_tot = V.sum $ V.map (\y -> (y - mean_y) ^ (2 :: Int)) ys
+        ss_res = V.sum $ V.map (\y -> (y - f y   ) ^ (2 :: Int)) ys
+        f x    = a * x + b

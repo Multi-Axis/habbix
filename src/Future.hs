@@ -44,15 +44,16 @@ data Result details = Result
             , reDetails :: details
             }
 
--- As encoded in DB
-type Event'  = Event Object
-type Result' = Result Object
+data DefParams = DefParams
+               { pStopLower :: Maybe Epoch -- can be negative, then relative to max(time)
+               , pStopUpper :: Maybe Epoch
+               }
 
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Event)
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Result)
+$(deriveJSON defaultOptions{fieldLabelModifier = (\(x:xs) -> toLower x : xs) . drop 1 } ''DefParams)
 
 type Points n = (V.Vector Epoch, V.Vector n)
-
 
 -- | Run forecast models against managed item histories and update
 -- respective tables in local db.
@@ -70,14 +71,34 @@ executeFutures = do
 
     forM_ itemIds $ \(Value itemid, Value params, Value vtype, Value futureid, Value model) -> do
 
-        liftIO $ putStrLn $ "Running predictions for item " ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+        liftIO . putStrLn $ "Running predictions for item "
+            ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+
+        let (histQuery, uintQuery) = buildQueries (fromJust $ decodeStrict' params)
+            query                  = selectHistory' itemid vtype histQuery uintQuery
 
         (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
                                         (historyVectors >=> return . second (V.map fromIntegral))
-                               $ selectHistory itemid vtype
+                                 query
+
         let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
-        runModel model ev
-            >>= maybe (error "Model returned Nothing") (runLocalDB . replaceFuture futureid vtype)
+
+        res <- runModel model ev
+        case res of
+            Left err   -> error $ "Could not parse the model response: " ++ err
+            Right res' -> runLocalDB $ replaceFuture futureid vtype res'
+
+-- buildQueries :: DefParams -> (a -> sqlquery, b -> sqlquery)
+buildQueries DefParams{..} = 
+    (\h -> do
+        withMaybe pStopLower $ \l -> where_ $ h ^. HistoryClock >=. val l
+        withMaybe pStopUpper $ \u -> where_ $ h ^. HistoryClock <=. val u
+    , \h -> do
+        withMaybe pStopLower $ \l -> where_ $ h ^. HistoryUintClock >=. val l
+        withMaybe pStopUpper $ \u -> where_ $ h ^. HistoryUintClock <=. val u
+    )
+
+withMaybe m f = maybe (return ()) f m
 
 historyVectors :: DPS n -> DB (Points n)
 historyVectors src = do
@@ -86,20 +107,18 @@ historyVectors src = do
 
 -- | Execute forecast model named @name@ in @forecast_models/<name>@ with
 -- given event and return result.
-runModel :: Text -> Event' -> Habbix (Maybe Result')
+runModel :: Text -> Event Object -> Habbix (Either String (Result Object))
 runModel name ev = do
     let filename = "forecast_models/" ++ unpack name
     res <- liftIO $ readProcess filename [] (unpack $ decodeUtf8 $ toStrict $ encode ev)
-    return . decodeStrict' . encodeUtf8 $ pack res
+    return . eitherDecodeStrict' . encodeUtf8 $ pack res
 
 -- | replaces the future with given result.
-replaceFuture :: Key ItemFuture -> Int -> Result' -> DB ()
+replaceFuture :: Key ItemFuture -> Int -> Result Object -> DB ()
 replaceFuture futid 0 Result{..} = do
     delete . from $ \fut -> where_ (fut ^. FutureItem ==. val futid)
     P.insertMany_ $ V.toList $ V.zipWith (\c v -> Future futid c (realToFrac v)) reClocks reValues
-
 replaceFuture futid 3 Result{..} = do
     delete . from $ \futuint -> where_ (futuint ^. FutureUintItem ==. val futid)
     P.insertMany_ $ V.toList $ V.zipWith (\c v -> FutureUint futid c (toRational v)) reClocks reValues
-
-replaceFuture _ _ _ = error "unknown value_type"
+replaceFuture _     n _          = error $ "unknown value_type: " ++ show n

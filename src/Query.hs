@@ -68,12 +68,25 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 type DPS val = Source DB (Epoch, val)
 
 -- | Get all history for given item.
-selectHistory :: Key Item -> Int -> Either (DPS FixedE4) (DPS Integer)
-selectHistory iid vtype =
+selectHistory :: Key Item -- ^ Key to item
+              -> Int      -- ^ value_type
+              -> Either (DPS FixedE4) (DPS Integer)
+selectHistory iid vtype = selectHistory' iid vtype
+    (\_ -> return ())
+    (\_ -> return ())
+
+-- | Get all history for given item.
+selectHistory' :: Key Item -- ^ Key to item
+              -> Int      -- ^ value_type
+              -> (SqlExpr (Entity History) -> SqlQuery ())
+              -> (SqlExpr (Entity HistoryUint) -> SqlQuery ())
+              -> Either (DPS FixedE4) (DPS Integer)
+selectHistory' iid vtype muHist muHistUint =
     unwrap $ case vtype of
 
         0 -> Left . selectSource . from $ \history -> do
             where_ $ history ^. HistoryItem ==. val iid
+            muHist history
             orderBy [asc $ history ^. HistoryClock]
             return (history ^. HistoryClock, history ^. HistoryValue)
 
@@ -82,6 +95,7 @@ selectHistory iid vtype =
 
         3 -> Right . selectSource . from $ \histUint -> do
             where_ (histUint ^. HistoryUintItem ==. val iid)
+            muHistUint histUint
             orderBy [asc $ histUint ^. HistoryUintClock]
             return (histUint ^. HistoryUintClock, histUint ^. HistoryUintValue)
 
