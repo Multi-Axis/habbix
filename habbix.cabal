@@ -72,4 +72,4 @@ executable habbix
 executable linreg
    main-is:            linreg.hs
    hs-source-dirs:     app
-   build-depends:      base, habbix, vector, aeson, bytestring
+   build-depends:      base, habbix, vector, aeson, bytestring, mtl, hstatistics

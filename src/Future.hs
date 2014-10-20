@@ -49,11 +49,11 @@ data DefParams = DefParams
                , pStopUpper :: Maybe Epoch
                }
 
+type Points n = (V.Vector Epoch, V.Vector n)
+
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Event)
 $(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Result)
 $(deriveJSON defaultOptions{fieldLabelModifier = (\(x:xs) -> toLower x : xs) . drop 1 } ''DefParams)
-
-type Points n = (V.Vector Epoch, V.Vector n)
 
 -- | Run forecast models against managed item histories and update
 -- respective tables in local db.
