@@ -15,9 +15,11 @@ import ZabbixDB
 import Query
 
 import           Control.Monad
+import           Control.Applicative
 import           Control.Arrow
 import           Control.Monad.IO.Class
 import           Data.Maybe
+import           Data.Time
 import           Data.Aeson hiding (Result)
 import           Data.Aeson.TH
 import qualified Data.ByteString      as B
@@ -30,12 +32,14 @@ import           Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import qualified Data.Vector as V
 import           Database.Esqueleto
 import qualified Database.Persist as P
+import           Database.Persist.Quasi (PersistSettings(psToDBName), lowerCaseSettings)
 import           System.Process (readProcess)
 
 data Event params = Event
            { evValueType :: Int
            , evClocks :: V.Vector Epoch
            , evValues :: V.Vector Double
+           , evDrawFuture :: (Epoch, Epoch)
            , evParams :: params
            }
 
@@ -52,38 +56,25 @@ data DefParams = DefParams
 
 type Points n = (V.Vector Epoch, V.Vector n)
 
-$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Event)
-$(deriveJSON defaultOptions{fieldLabelModifier = map toLower . drop 2 } ''Result)
-$(deriveJSON defaultOptions{fieldLabelModifier = (\(x:xs) -> toLower x : xs) . drop 1 } ''DefParams)
+$(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSettings . pack . drop 2 } ''Event)
+$(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSettings . pack . drop 2 } ''Result)
+$(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSettings . pack . drop 1 } ''DefParams)
 
 -- | Run forecast models against managed item histories and update
 -- respective tables in local db.
-executeFutures :: Habbix ()
-executeFutures = do
-    itemIds <- runLocalDB . select . from $ \(item `InnerJoin` itemFut `InnerJoin` futModel) -> do
+executeFutures :: Maybe [ItemFutureId] -> Habbix ()
+executeFutures mis = do
+    stuff <- runLocalDB . select . from $ \(item `InnerJoin` itemFut `InnerJoin` futModel) -> do
         on (futModel ^. FutureModelId ==. itemFut ^. ItemFutureModel)
         on (itemFut ^. ItemFutureItem ==. item ^. ItemId)
+        withMaybe mis $ \is -> where_ (itemFut ^. ItemFutureId `in_` valList is)
         return ( itemFut  ^. ItemFutureItem
                , itemFut  ^. ItemFutureParams
                , item     ^. ItemValueType
                , itemFut  ^. ItemFutureId
                , futModel ^. FutureModelName
                )
-    forM_ itemIds executeModel
-
-executeFuture :: ItemFutureId -> Habbix ()
-executeFuture i = do
-    (itemId:_) <- runLocalDB . select . from $ \(item `InnerJoin` itemFut `InnerJoin` futModel) -> do
-        on (futModel ^. FutureModelId ==. itemFut ^. ItemFutureModel)
-        on (itemFut ^. ItemFutureItem ==. item ^. ItemId)
-        where_ (itemFut ^. ItemFutureId ==. val i)
-        return ( itemFut  ^. ItemFutureItem
-               , itemFut  ^. ItemFutureParams
-               , item     ^. ItemValueType
-               , itemFut  ^. ItemFutureId
-               , futModel ^. FutureModelName
-               )
-    executeModel itemId
+    mapM_ executeModel stuff
 
 executeModel (Value itemid, Value params, Value vtype, Value futureid, Value model) = do
     liftIO . putStrLn $ "Running predictions for item "
@@ -98,7 +89,9 @@ executeModel (Value itemid, Value params, Value vtype, Value futureid, Value mod
                                             (historyVectors >=> return . second (V.map fromIntegral))
                                      query
 
-            let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
+            curEpoch <- read . formatTime undefined "%s" <$> liftIO getCurrentTime
+
+            let ev = Event vtype cs hs (curEpoch, curEpoch + 7 * 86400) (fromJust $ decodeStrict' params)
 
             res <- runModel model ev
             case res of

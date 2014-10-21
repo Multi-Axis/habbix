@@ -45,18 +45,19 @@ main = do
     Just Event{..} <- decode <$> C.getContents
     let Params{..} = evParams
 
-    -- filters
-    let (_, (clocks, values)) = (`runState` (V.convert evClocks, V.convert evValues)) $ do
+    let (res, _) = (`runState` (V.convert evClocks, V.convert evValues)) $ do
+
+            -- PreFilters
             withMaybe preFilter applyFilter 
 
-    -- lin reg
-    let (a, b, r2) = simpleLinearRegression (V.convert $ V.map fromIntegral clocks) (V.convert values)
+            -- lin reg
+            (a, b, r2) <- uncurry simpleLinearRegression . (V.convert . V.map fromIntegral *** V.convert) <$> get
 
-    -- results
-    let details = Details { r2det     = r2 }
-        res     = Result  { reClocks  = DV.iterateN 7 (+ aday) (DV.last evClocks)
-                          , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
-                          , reDetails = details }
+            let details = Details { r2det = r2 }
+
+            return $ Result { reClocks  = DV.iterateN (ceiling $ fromIntegral (snd evDrawFuture - fst evDrawFuture) / fromIntegral aday) (+ aday) (fst evDrawFuture)
+                            , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
+                            , reDetails = details }
     C.putStrLn (encode res)
 
 -- | apply the filter

@@ -45,6 +45,8 @@ library
                      , utility-ht
                      , process
                      , aeson
+                     , time
+
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
 

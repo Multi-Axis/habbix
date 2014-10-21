@@ -38,3 +38,9 @@ its standard input, and a `Result` JSON object is expected as standard output.
 Very tricky, because haskell package `postgresql-libpq` requires `pq` library
 which requires `krb5` library, and linking (recentish) `krb5` statically is
 unsupported and won't work.
+
+# linreg
+
+`params`:
+
+    "preFilter" : "DailyMax" | "DailyMin"
