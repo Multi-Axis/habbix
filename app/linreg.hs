@@ -69,8 +69,8 @@ applyFilter fi = do
     modify (indexedFilter ixs fi *** indexedFilter ixs fi)
 
 indexedFilter :: (Ord n, V.Storable n) => V.Vector Int -> Filter -> V.Vector n -> V.Vector n
-indexedFilter ixs DailyMax xs = V.zipWith (\i j -> V.maximum $ V.slice i j xs) ixs (V.init ixs `V.snoc` maxBound)
-indexedFilter ixs DailyMin xs = V.zipWith (\i j -> V.minimum $ V.slice i j xs) ixs (V.init ixs `V.snoc` maxBound)
+indexedFilter ixs DailyMax xs = V.zipWith (\i j -> V.maximum $ V.slice i j xs) ixs (V.init ixs)
+indexedFilter ixs DailyMin xs = V.zipWith (\i j -> V.minimum $ V.slice i j xs) ixs (V.init ixs)
 
 aday :: Int
 aday = 60 * 60 * 24

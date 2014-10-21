@@ -20,7 +20,8 @@ import           Control.Monad.IO.Class
 import           Data.Maybe
 import           Data.Aeson hiding (Result)
 import           Data.Aeson.TH
-import           Data.ByteString.Lazy (toStrict)
+import qualified Data.ByteString      as B
+import qualified Data.ByteString.Lazy as BL
 import           Data.Char (toLower)
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
@@ -74,19 +75,23 @@ executeFutures = do
         liftIO . putStrLn $ "Running predictions for item "
             ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
 
-        let (histQuery, uintQuery) = buildQueries (fromJust $ decodeStrict' params)
-            query                  = selectHistory' itemid vtype histQuery uintQuery
+        case  decodeStrict' params of
+            Just p -> do
+                let (histQuery, uintQuery) = buildQueries p
+                let query = selectHistory' itemid vtype histQuery uintQuery
 
-        (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
-                                        (historyVectors >=> return . second (V.map fromIntegral))
-                                 query
+                (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
+                                                (historyVectors >=> return . second (V.map fromIntegral))
+                                         query
 
-        let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
+                let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
 
-        res <- runModel model ev
-        case res of
-            Left err   -> error $ "Could not parse the model response: " ++ err
-            Right res' -> runLocalDB $ replaceFuture futureid vtype res'
+                res <- runModel model ev
+                case res of
+                    Left err   -> error $ "Could not parse the model response: " ++ err
+                    Right res' -> runLocalDB $ replaceFuture futureid vtype res'
+
+            Nothing -> error $ "item_future.params is BROKEN for id = " ++ show (fromSqlKey itemid)
 
 -- buildQueries :: DefParams -> (a -> sqlquery, b -> sqlquery)
 buildQueries DefParams{..} = 
@@ -110,7 +115,7 @@ historyVectors src = do
 runModel :: Text -> Event Object -> Habbix (Either String (Result Object))
 runModel name ev = do
     let filename = "forecast_models/" ++ unpack name
-    res <- liftIO $ readProcess filename [] (unpack $ decodeUtf8 $ toStrict $ encode ev)
+    res <- liftIO $ readProcess filename [] (unpack $ decodeUtf8 $ B.concat . BL.toChunks $ encode ev)
     return . eitherDecodeStrict' . encodeUtf8 $ pack res
 
 -- | replaces the future with given result.
