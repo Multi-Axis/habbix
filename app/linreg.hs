@@ -62,11 +62,20 @@ main = do
 -- | apply the filter
 applyFilter :: Filter -> Predict ()
 applyFilter fi = do
-    clocks <- gets fst :: Predict (V.Vector Epoch)
-    let (cmin, cmax) = (floor $ fromIntegral (V.minimum clocks) / fromIntegral aday, ceiling $ fromIntegral (V.maximum clocks) / fromIntegral aday)
-        ixs          = cut (V.map fromIntegral clocks) $ V.map (fromIntegral . (* aday)) $ V.fromList [cmin .. cmax]
+    (clocks, values) <- get
+    let zipped = DV.zip (V.convert clocks) (V.convert values)
+    put $ (V.convert *** V.convert) $ DV.unzip $ DV.foldl' f (DV.singleton (DV.head zipped)) (DV.tail zipped)
+  where
+    f xs (c, v) =
+        let (c', v') = DV.last xs 
+        in if toDay c == toDay c' then DV.init xs `DV.snoc` (c, comp v v')
+                                  else xs         `DV.snoc` (c, v)
+    comp = case fi of
+               DailyMax -> max
+               dailyMin -> min
 
-    modify (indexedFilter ixs fi *** indexedFilter ixs fi)
+toDay :: Epoch -> Int
+toDay = floor . ( / fromIntegral aday) . fromIntegral
 
 indexedFilter :: (Ord n, V.Storable n) => V.Vector Int -> Filter -> V.Vector n -> V.Vector n
 indexedFilter ixs DailyMax xs = V.zipWith (\i j -> V.maximum $ V.slice i j xs) ixs (V.init ixs)
