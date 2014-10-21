@@ -69,29 +69,44 @@ executeFutures = do
                , itemFut  ^. ItemFutureId
                , futModel ^. FutureModelName
                )
+    forM_ itemIds executeModel
 
-    forM_ itemIds $ \(Value itemid, Value params, Value vtype, Value futureid, Value model) -> do
+executeFuture :: ItemFutureId -> Habbix ()
+executeFuture i = do
+    (itemId:_) <- runLocalDB . select . from $ \(item `InnerJoin` itemFut `InnerJoin` futModel) -> do
+        on (futModel ^. FutureModelId ==. itemFut ^. ItemFutureModel)
+        on (itemFut ^. ItemFutureItem ==. item ^. ItemId)
+        where_ (itemFut ^. ItemFutureId ==. val i)
+        return ( itemFut  ^. ItemFutureItem
+               , itemFut  ^. ItemFutureParams
+               , item     ^. ItemValueType
+               , itemFut  ^. ItemFutureId
+               , futModel ^. FutureModelName
+               )
+    executeModel itemId
 
-        liftIO . putStrLn $ "Running predictions for item "
-            ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+executeModel (Value itemid, Value params, Value vtype, Value futureid, Value model) = do
+    liftIO . putStrLn $ "Running predictions for item "
+        ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
 
-        case  decodeStrict' params of
-            Just p -> do
-                let (histQuery, uintQuery) = buildQueries p
-                let query = selectHistory' itemid vtype histQuery uintQuery
+    case  decodeStrict' params of
+        Just p -> do
+            let (histQuery, uintQuery) = buildQueries p
+            let query = selectHistory' itemid vtype histQuery uintQuery
 
-                (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
-                                                (historyVectors >=> return . second (V.map fromIntegral))
-                                         query
+            (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.map realToFrac))
+                                            (historyVectors >=> return . second (V.map fromIntegral))
+                                     query
 
-                let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
+            let ev = Event vtype cs hs (fromJust $ decodeStrict' params)
 
-                res <- runModel model ev
-                case res of
-                    Left err   -> error $ "Could not parse the model response: " ++ err
-                    Right res' -> runLocalDB $ replaceFuture futureid vtype res'
+            res <- runModel model ev
+            case res of
+                Left err   -> error $ "Could not parse the model response: " ++ err
+                Right res' -> runLocalDB $ replaceFuture futureid vtype res'
 
-            Nothing -> error $ "item_future.params is BROKEN for id = " ++ show (fromSqlKey itemid)
+        Nothing -> error $ "item_future.params is BROKEN for id = " ++ show (fromSqlKey itemid)
+    
 
 -- buildQueries :: DefParams -> (a -> sqlquery, b -> sqlquery)
 buildQueries DefParams{..} = 

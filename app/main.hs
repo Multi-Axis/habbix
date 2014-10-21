@@ -47,7 +47,7 @@ data Program = CLsHosts { outType :: DataOutType }
              | CLsItems { outType :: DataOutType, argid :: Int64 }
              | CLsData  { outType :: DataOutType, argid :: Int64, samples :: Int }
              | CMigrate { outType :: DataOutType }
-             | CSync    { outType :: DataOutType, syncAll :: Bool }
+             | CSync    { outType :: DataOutType, syncAll :: Bool, itemToSync :: Maybe Int64 }
              | CLsModels { outType :: DataOutType }
              | CLsFuture { outType :: DataOutType }
              | CAddModel { outType :: DataOutType, executable :: String }
@@ -73,7 +73,8 @@ prgConf = modes
 
     , CMigrate  { } &= name "migrate-db" &= help "Create or update the local DB schema"
 
-    , CSync     { syncAll = False &= help "Sync every table, not just history"
+    , CSync     { syncAll    = False &= help "Sync every table, not just history"
+                , itemToSync = Nothing &= help "Optional item_future.id to sync"
                 } &= name "sync-db" &=  help "Synchronize remote db with local and run futures"
 
     , CLsModels { } &= name "ls-models" &= help "List available future models"
@@ -115,8 +116,9 @@ main = do
 
             CSync{..} -> do
                 when syncAll populateZabbixParts
-                populateHistory
-                executeFutures
+                case itemToSync of
+                    Nothing -> populateHistory >> executeFutures
+                    Just i  -> executeFuture (toSqlKey i)
 
             CLsModels{..} -> runLocalDB (P.selectList [] []) >>= liftIO . printFutureModels
 
