@@ -68,8 +68,8 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 type DPS val = Source DB (Epoch, val)
 
 -- | Get all history for given item.
-selectHistory :: Key Item -- ^ Key to item
-              -> Int      -- ^ value_type
+selectHistory :: ItemId -- ^ Key to item
+              -> Int    -- ^ value_type
               -> Either (DPS FixedE4) (DPS Integer)
 selectHistory iid vtype = selectHistory' iid vtype
     (\_ -> return ())

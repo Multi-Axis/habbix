@@ -27,7 +27,8 @@ import           Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import           Data.Aeson
 import qualified Data.Yaml as Yaml
 import qualified Data.ByteString.Lazy.Char8 as BLC
-import qualified Data.Vector as V
+import qualified Data.Vector as DV
+import qualified Data.Vector.Storable as V
 import           Database.Esqueleto
 import qualified Database.Persist as P
 import           System.Console.CmdArgs
@@ -50,6 +51,7 @@ data Program = CLsHosts { outType :: DataOutType }
              | CSync    { outType :: DataOutType, syncAll :: Bool, itemsToSync :: [Int64] }
              | CLsModels { outType :: DataOutType }
              | CLsFuture { outType :: DataOutType }
+             | Compare   { outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
              | CAddModel { outType :: DataOutType, executable :: String }
              | NewFuture { outType :: DataOutType, argid :: Int64, model :: Int64 }
              deriving (Show, Data, Typeable)
@@ -86,6 +88,10 @@ prgConf = modes
 
     , NewFuture { model = def &= argPos 1 &= typ "MODELID"
                 } &= name "new-future" &= help "Add future with MODELID for ITEMID"
+
+    , Compare   { fromInterval = def &= help "Interval to use with predictions"
+                , toInterval   = def &= help "Interval to compare the predicted model to"
+                } &= help "Compare predictions from knowing A to an actual history B"
 
     ] &= program "habbix" &= verbosity
 
@@ -127,6 +133,9 @@ main = do
             CAddModel{..} -> runLocalDB $ P.insert_ $ FutureModel (pack executable)
 
             NewFuture{..} -> runLocalDB $ P.insert_ $ ItemFuture (toSqlKey argid) (toSqlKey model) "{}"
+
+            Compare{..} | argid <= 0 -> error "itemFutureId must be > 0"
+                        | otherwise  -> futureCompare (toSqlKey argid) fromInterval toInterval
 
 -- | Print model info
 printFutureModels :: [Entity FutureModel] -> IO ()
@@ -175,13 +184,13 @@ printApps apps = do
 
 -- | Print a history item <epoch>,<value>
 printHists :: (MonadIO m, Show n) => Points n -> m ()
-printHists (ts, vs) = zipWithM_ (\t v -> print "{} {}\n" (t, show v)) (V.toList ts) (V.toList vs)
+printHists (ts, vs) = zipWithM_ (\t v -> print "{} {}\n" (t, show v)) (V.toList ts) (DV.toList vs)
 
 -- | History data in JSON
 printJsonHists :: (MonadIO m, ToJSON n) => Points n -> m ()
 printJsonHists (ts, vs) =
     liftIO . BLC.putStrLn . encode . toJSON
-    $ zipWith (\t v -> object [ "time" .= t, "val" .= v]) (V.toList ts) (V.toList vs)
+    $ zipWith (\t v -> object [ "time" .= t, "val" .= v]) (V.toList ts) (DV.toList vs)
     
 
 -- History stuff
@@ -192,5 +201,5 @@ sampled n (ts, vs) =
     let interval   = fromIntegral (V.length ts) / fromIntegral n :: Double
         getIndex i = floor ((fromIntegral i + 1) * interval - 1)
         in ( V.generate n $ \i -> ts V.! getIndex i
-           , V.generate n $ \i -> vs V.! getIndex i
+           , DV.generate n $ \i -> vs DV.! getIndex i
            )

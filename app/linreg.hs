@@ -10,7 +10,7 @@
 -- Stability      : experimental
 -- Portability    : non-portable
 ------------------------------------------------------------------------------
-module Main where
+module Main (main) where
 
 import ZabbixDB (Epoch)
 import Forecast
@@ -55,8 +55,8 @@ main = do
 
             let details = Details { r2det = r2 }
 
-            return $ Result { reClocks  = DV.iterateN (ceiling $ fromIntegral (snd evDrawFuture - fst evDrawFuture) / fromIntegral aday) (+ aday) (fst evDrawFuture)
-                            , reValues  = (\x -> a * fromIntegral x + b) <$> reClocks res
+            return $ Result { reClocks  = evClocks
+                            , reValues  = V.map (\x -> a * fromIntegral x + b) evDrawFuture
                             , reDetails = details }
     C.putStrLn (encode res)
 

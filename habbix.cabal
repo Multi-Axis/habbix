@@ -46,6 +46,8 @@ library
                      , process
                      , aeson
                      , time
+                     , hmatrix
+                     , hstatistics
 
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
