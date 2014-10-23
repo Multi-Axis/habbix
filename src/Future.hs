@@ -109,7 +109,7 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value f
 nextWeek :: IO (V.Vector Epoch)
 nextWeek = do
     curEpoch <- read . formatTime undefined "%s" <$> getCurrentTime
-    return $ V.fromList [curEpoch, 86400 .. curEpoch + 7 * 86401]
+    return $ V.fromList [curEpoch, curEpoch + 86400 .. curEpoch + 7 * 86401]
 
 getDoubleHistory i params = do
     Just ItemFuture{..} <- runLocalDB $ get i
