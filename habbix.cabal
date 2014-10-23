@@ -19,6 +19,10 @@ flag old-postgresql
    description:      Build for PostgreSQL <= 8.4.
    default:          False
 
+flag statistics
+   description:      Build hmatrix/hstatistics dependant stuff
+   default:          False
+
 library
   exposed-modules:     ZabbixDB
                      , Query
@@ -46,8 +50,12 @@ library
                      , process
                      , aeson
                      , time
-                     , hmatrix
-                     , hstatistics
+
+  default-extensions: CPP
+  if flag(statistics)
+      build-depends: hmatrix
+                   , hstatistics
+      CC-Options:   -DSTATISTICS
 
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
@@ -76,4 +84,4 @@ executable habbix
 executable linreg
    main-is:            linreg.hs
    hs-source-dirs:     app
-   build-depends:      base, habbix, vector, aeson, bytestring, mtl, hstatistics
+   build-depends:      base, habbix, vector, aeson, bytestring, mtl

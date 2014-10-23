@@ -25,7 +25,6 @@ import Data.Monoid
 import qualified Data.Vector.Storable as V
 import qualified Data.Vector as DV
 import qualified Data.ByteString.Lazy.Char8 as C
-import Numeric.Statistics
 
 type Predict = State (V.Vector Epoch, V.Vector Double)
 

@@ -36,7 +36,9 @@ import qualified Database.Persist as P
 import           Database.Persist.Quasi (PersistSettings(psToDBName), lowerCaseSettings)
 import           System.Process (readProcess)
 
+#ifdef STATISTICS
 import           Numeric.Statistics
+#endif
 
 data Event params = Event
            { evValueType :: Int
@@ -155,6 +157,7 @@ replaceFuture futid 3 Result{..} = do
     P.insertMany_ $ zipWith (\c v -> FutureUint futid c (toRational v)) (V.toList reClocks) (V.toList reValues)
 replaceFuture _     n _          = error $ "unknown value_type: " ++ show n
 
+#ifdef STATISTICS
 futureCompare :: ItemFutureId -> (Epoch, Epoch) -> (Epoch, Epoch) -> Habbix ()
 futureCompare i (sf, ef) (sr, er) = do
     (x:_)           <- getItemFutures (Just [i])
@@ -162,3 +165,4 @@ futureCompare i (sf, ef) (sr, er) = do
     (_, realValues) <- getDoubleHistory i $ DefParams (Just sr) (Just er)
 
     liftIO $ putStrLn $ "Spearman: " ++ show (spearman reValues realValues)
+#endif
