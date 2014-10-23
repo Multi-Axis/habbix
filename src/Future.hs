@@ -151,9 +151,12 @@ runModel name ev = do
 replaceFuture :: Key ItemFuture -> Int -> Result Object -> DB ()
 replaceFuture futid 0 Result{..} = do
     delete . from $ \fut -> where_ (fut ^. FutureItem ==. val futid)
+    liftIO $ print reDetails
+    P.update futid [ItemFutureDetails P.=. B.concat (BL.toChunks (encode reDetails))]
     P.insertMany_ $ zipWith (\c v -> Future futid c (realToFrac v)) (V.toList reClocks) (V.toList reValues)
 replaceFuture futid 3 Result{..} = do
     delete . from $ \futuint -> where_ (futuint ^. FutureUintItem ==. val futid)
+    P.update futid [ItemFutureDetails P.=. B.concat (BL.toChunks (encode reDetails))]
     P.insertMany_ $ zipWith (\c v -> FutureUint futid c (toRational v)) (V.toList reClocks) (V.toList reValues)
 replaceFuture _     n _          = error $ "unknown value_type: " ++ show n
 

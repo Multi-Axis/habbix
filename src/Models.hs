@@ -95,6 +95,7 @@ ItemFuture
     item        ItemId          sql=itemid
     model       FutureModelId   sql=modelid
     params      ByteString
+    details     ByteString
     deriving Show
 
 -- wrt history

@@ -55,10 +55,11 @@ library
   if flag(statistics)
       build-depends: hmatrix
                    , hstatistics
-      CC-Options:   -DSTATISTICS
+      cpp-options:   -DSTATISTICS
 
   if flag(old-postgresql)
       build-depends: postgresql-libpq < 0.9
+
 
   hs-source-dirs:      src
   default-language:    Haskell2010
@@ -79,6 +80,10 @@ executable habbix
                      , text-format
                      , aeson
                      , bytestring
+  if flag(statistics)
+      build-depends: hmatrix
+                   , hstatistics
+      cpp-options:   -DSTATISTICS
   default-language:    Haskell2010
 
 executable linreg

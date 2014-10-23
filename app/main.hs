@@ -133,7 +133,7 @@ main = do
 
             CAddModel{..} -> runLocalDB $ P.insert_ $ FutureModel (pack executable)
 
-            NewFuture{..} -> runLocalDB $ P.insert_ $ ItemFuture (toSqlKey argid) (toSqlKey model) "{}"
+            NewFuture{..} -> runLocalDB $ P.insert_ $ ItemFuture (toSqlKey argid) (toSqlKey model) "{}" "{}"
 
 #ifdef STATISTICS
             Compare{..} | argid <= 0 -> error "itemFutureId must be > 0"
