@@ -44,18 +44,18 @@ data Event params = Event
            , evValues :: V.Vector Double
            , evDrawFuture :: V.Vector Epoch
            , evParams :: params
-           }
+           } deriving (Show)
 
 data Result details = Result
             { reClocks :: V.Vector Epoch
             , reValues :: V.Vector Double
             , reDetails :: details
-            }
+            } deriving (Show)
 
 data DefParams = DefParams
                { pStopLower :: Maybe Epoch -- can be negative, then relative to max(time)
                , pStopUpper :: Maybe Epoch
-               }
+               } deriving (Show)
 
 type Points n = (V.Vector Epoch, DV.Vector n)
 

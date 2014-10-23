@@ -55,7 +55,7 @@ main = do
 
             let details = Details { r2det = r2 }
 
-            return $ Result { reClocks  = evClocks
+            return $ Result { reClocks  = evDrawFuture
                             , reValues  = V.map (\x -> a * fromIntegral x + b) evDrawFuture
                             , reDetails = details }
     C.putStrLn (encode res)
