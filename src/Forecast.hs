@@ -32,5 +32,5 @@ simpleLinearRegression xs ys = (a, b, r2)
 
         r2     = 1 - ss_res / ss_tot
         ss_tot = V.sum $ V.map (\y -> (y - mean_y) ^ (2 :: Int)) ys
-        ss_res = V.sum $ V.map (\y -> (y - f y   ) ^ (2 :: Int)) ys
+        ss_res = V.sum $ V.zipWith (\x y -> (y - f x) ^ (2 :: Int)) xs ys
         f x    = a * x + b
