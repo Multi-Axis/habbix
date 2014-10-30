@@ -135,10 +135,8 @@ main = do
 
             NewFuture{..} -> runLocalDB $ P.insert_ $ ItemFuture (toSqlKey argid) (toSqlKey model) "{}" "{}"
 
-#ifdef STATISTICS
             Compare{..} | argid <= 0 -> error "itemFutureId must be > 0"
                         | otherwise  -> futureCompare (toSqlKey argid) fromInterval toInterval
-#endif
 
 -- | Print model info
 printFutureModels :: [Entity FutureModel] -> IO ()
