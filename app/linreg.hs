@@ -19,16 +19,16 @@ import Future
 import Control.Applicative
 import Control.Arrow
 import Control.Monad.State.Strict
+import Data.Function
 import Data.Aeson
 import Data.Aeson.TH
-import Data.Monoid
 import qualified Data.Vector.Storable as V
 import qualified Data.Vector as DV
 import qualified Data.ByteString.Lazy.Char8 as C
 
 type Predict = State (V.Vector Epoch, V.Vector Double)
 
-data Filter = DailyMax | DailyMin
+data Filter = DailyMax | DailyMin | DailyAvg
 
 data Params = Params
             { preFilter :: Maybe Filter }
@@ -54,32 +54,44 @@ main = do
 
             let details = Details { r2det = r2 }
 
-            return $ Result { reClocks  = evDrawFuture
-                            , reValues  = V.map (\x -> a * fromIntegral x + b) evDrawFuture
-                            , reDetails = details }
+            return Result { reClocks  = evDrawFuture
+                          , reValues  = V.map (\x -> a * fromIntegral x + b) evDrawFuture
+                          , reDetails = details }
     C.putStrLn (encode res)
 
 -- | apply the filter
 applyFilter :: Filter -> Predict ()
 applyFilter fi = do
     (clocks, values) <- get
-    let zipped = DV.zip (V.convert clocks) (V.convert values)
-    put $ (V.convert *** V.convert) $ DV.unzip $ DV.foldl' f (DV.singleton (DV.head zipped)) (DV.tail zipped)
+
+    let ixs       = DV.map fst $ filterDaily (V.convert clocks)
+        slices v  = DV.zipWith (\i j -> DV.slice i (j - i) v) ixs (DV.init ixs)
+
+    put . (V.convert *** V.convert) . DV.unzip . DV.map apply . slices
+        $ DV.zip (V.convert clocks) (V.convert values)
+
   where
-    f xs (c, v) =
-        let (c', v') = DV.last xs 
-        in if toDay c == toDay c' then DV.init xs `DV.snoc` (c, comp v v')
-                                  else xs         `DV.snoc` (c, v)
-    comp = case fi of
-               DailyMax -> max
-               dailyMin -> min
+    apply = case fi of
+       DailyMax -> DV.maximumBy (compare `on` snd)
+       DailyMin -> DV.minimumBy (compare `on` snd)
+       DailyAvg -> (vectorMedian *** vectorAvg) . DV.unzip
+
+-- | Fold left; accumulate the current index (and timestamp) when day changes.
+filterDaily :: DV.Vector Epoch -> DV.Vector (Int, Epoch)
+filterDaily = DV.ifoldl' go <$> DV.singleton . (\x -> (0, x)) . DV.head <*> DV.init
+    where
+        go v m c
+            | (_, t) <- DV.last v, t /= toDay c = v
+            | otherwise                         = v `DV.snoc` (m, toDay c)
+
+vectorAvg :: (Real a, Fractional a) => DV.Vector a -> a
+vectorAvg v = fromRational $ toRational (DV.sum v) / toRational (DV.length v)
+
+vectorMedian :: DV.Vector a -> a
+vectorMedian v = v DV.! floor (fromIntegral (DV.length v) / 2 :: Double)
 
 toDay :: Epoch -> Int
-toDay = floor . ( / fromIntegral aday) . fromIntegral
-
-indexedFilter :: (Ord n, V.Storable n) => V.Vector Int -> Filter -> V.Vector n -> V.Vector n
-indexedFilter ixs DailyMax xs = V.zipWith (\i j -> V.maximum $ V.slice i j xs) ixs (V.init ixs)
-indexedFilter ixs DailyMin xs = V.zipWith (\i j -> V.minimum $ V.slice i j xs) ixs (V.init ixs)
+toDay = floor . (/ fromIntegral aday) . fromIntegral
 
 aday :: Int
 aday = 60 * 60 * 24
