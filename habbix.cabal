@@ -63,6 +63,7 @@ library
 
   hs-source-dirs:      src
   default-language:    Haskell2010
+  ghc-options:         -Wall
 
 executable habbix
   main-is:             main.hs
@@ -77,16 +78,18 @@ executable habbix
                      , esqueleto
                      , persistent
                      , transformers
-                     , text-format
                      , aeson
+                     , aeson-pretty
                      , bytestring
   if flag(statistics)
       build-depends: hmatrix
                    , hstatistics
       cpp-options:   -DSTATISTICS
   default-language:    Haskell2010
+  ghc-options:         -Wall
 
 executable linreg
    main-is:            linreg.hs
    hs-source-dirs:     app
    build-depends:      base, habbix, vector, aeson, bytestring, mtl
+  ghc-options:         -Wall

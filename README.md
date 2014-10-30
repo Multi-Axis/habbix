@@ -13,9 +13,9 @@ Make sure both databases exist.
 
 ## Usage
 
-- Create local database schema: `habbix migrate-db`.
-- Populate or update local db with data from remote db: `habbix sync-db -s600`.
-- Update recent history data only `habbix sync-db`
+- Create local database schema: `habbix migratedb`.
+- Populate or update local db with data from remote db: `habbix sync -s600`.
+- Update recent history data only `habbix sync`
 
 Careful with the populate/update outputs, by default they output a *lot* of
 debug msgs to stderr.

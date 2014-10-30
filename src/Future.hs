@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards #-}
 ------------------------------------------------------------------------------
--- | 
+-- |
 -- Module         : Future
 -- Copyright      : (C) 2014 Samuli Thomasson
 -- License        : MIT (see the file LICENSE)
@@ -24,7 +24,6 @@ import           Data.Aeson hiding (Value, Result)
 import           Data.Aeson.TH
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.Lazy as BL
-import           Data.Char (toLower)
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.Text (Text, unpack, pack)
@@ -67,14 +66,22 @@ $(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSe
 
 -- * Running predictions
 
--- | Run forecast models against managed item histories and update
--- respective tables in local db.
-executeFutures :: Maybe [ItemFutureId] -> Habbix ()
-executeFutures mis = do
-    iv    <- liftIO nextWeek
-    stuff <- getItemFutures mis
-    forM_ stuff $ \x@(_, _, Value vtype, Value futureId, _) ->
-        executeModel (const iv) id x >>= runLocalDB . replaceFuture futureId vtype . snd
+-- | apply @executeFutures@ and replacePredictionInDB
+executeFutures' :: Maybe [ItemFutureId] -> Habbix ()
+executeFutures' mis = do
+    xs <- getItemFutures mis
+    forM_ xs $ \dd -> executeModelNextWeek dd >>= replacePredictionInDB dd
+
+-- | Run forecast models against managed item histories.
+executeFutures :: Maybe [ItemFutureId] -> Habbix [(Event Object, Result Object)]
+executeFutures = getItemFutures >=> mapM executeModelNextWeek
+
+runFuture :: ItemFutureId -> Habbix (Event Object, Result Object)
+runFuture futId = head <$> executeFutures (Just [futId])
+
+-- | Update respective tables in the local db.
+replacePredictionInDB :: FutureDrawData -> (Event Object, Result Object) -> Habbix ()
+replacePredictionInDB (_,_, Value vtype, Value futId, _)  (_, res) = runLocalDB $ replaceFuture futId vtype res
 
 -- * Query history and prediction configuration data
 
@@ -114,7 +121,7 @@ buildQueries :: (Esqueleto m1 expr1 backend1, Esqueleto m expr backend)
              => Epoch -- ^ Today (where pStopLower is relative to when it is < 0)
              -> DefParams
              -> (expr (Entity History) -> m (), expr1 (Entity HistoryUint) -> m1 ())
-buildQueries today DefParams{..} = 
+buildQueries today DefParams{..} =
     (\h -> do
         withMaybe pStopLower $ \l -> where_ $ h ^. HistoryClock >=. val (if l < 0 then today + l else l)
         withMaybe pStopUpper $ \u -> where_ $ h ^. HistoryClock <=. val u
@@ -130,14 +137,20 @@ historyVectors src = do
 
 -- * Run models
 
+executeModelNextWeek :: FutureDrawData -> Habbix (Event Object, Result Object)
+executeModelNextWeek dd = do
+    iv <- liftIO nextWeek
+    executeModel (const iv) id dd
+
 -- | Execute a single model
-executeModel :: (V.Vector Epoch -> V.Vector Epoch)
-             -> (DefParams -> DefParams)
+executeModel :: (V.Vector Epoch -> V.Vector Epoch) -- ^ Build Event.drawFuture based on the history clocks
+             -> (DefParams -> DefParams) -- ^ Modify params relevant inside habbix
              -> FutureDrawData
              -> Habbix (Event Object, Result Object)
-executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value futureid, Value model) = do
-    liftIO . putStrLn $ "Running predictions for item "
-        ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value _futureid, Value model) = do
+
+    -- $debug
+    -- liftIO . putStrLn $ "Running predictions for item " ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
 
     case  decodeStrict' params of
         Just p -> do
@@ -185,14 +198,14 @@ replaceFuture _     n _          = error $ "unknown value_type: " ++ show n
 
 -- * Statistical
 
-futureCompare :: ItemFutureId -> (Epoch, Epoch) -> (Epoch, Epoch) -> Habbix ()
+futureCompare :: ItemFutureId -> (Epoch, Epoch) -> (Epoch, Epoch) -> Habbix String
 #ifdef STATISTICS
 futureCompare i (sf, ef) (sr, er) = do
     (x:_)           <- getItemFutures (Just [i])
     (_, Result{..}) <- executeModel (V.takeWhile (<= ef) . V.dropWhile (< sf)) (const $ DefParams Nothing Nothing) x
     (_, realValues) <- getDoubleHistory i $ DefParams (Just sr) (Just er)
 
-    liftIO $ putStrLn $ "Spearman: " ++ show (spearman reValues realValues)
+    return $ "Spearman: " ++ show (spearman reValues realValues)
 #else
 futureCompare _ _ _ = error "habbix was not compiled with -fstatistics"
 #endif
