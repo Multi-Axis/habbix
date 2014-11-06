@@ -21,7 +21,7 @@ import           Future
 import           Prelude
 import           Control.Applicative
 import           Control.Monad
-import           Data.Aeson
+import           Data.Aeson hiding (Result)
 import qualified Data.Aeson.Encode.Pretty   as A
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.Maybe
@@ -54,7 +54,7 @@ data Program = Hosts     { config :: String, outType :: DataOutType }
              | MigrateDb { config :: String, outType :: DataOutType }
              | Sync      { config :: String, outType :: DataOutType, syncAll :: Bool, itemsToSync :: [Int64] }
              | Configure { config :: String, outType :: DataOutType, item :: Int64, model :: Int64, executable :: String }
-             | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String }
+             | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String, outCombine :: Bool }
              | Compare   { config :: String, outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
              deriving (Show, Data, Typeable)
 
@@ -90,6 +90,7 @@ prgConf = modes
     -- Info
     , Execute   { -- argid
                   params = "" &= typ "JSON"
+                , outCombine = False &= help "Combine clock/value in the output"
                 } &= help "Execute item_future.ID but only output the results, instead of modifying database"
     , Compare   { -- argid
                   fromInterval = def &= help "Interval to use with predictions"
@@ -145,7 +146,8 @@ main = do
             | otherwise -> do
                 [(a, p, t, f, m)] <- getItemFutures $ Just [toSqlKey argid]
                 let p' = if not (null params) then E.Value (encodeUtf8 $ pack params) else p
-                toJSON . snd <$> executeModelNextWeek (a, p', t, f, m)
+                (if outCombine then resultCombine else toJSON) . snd
+                    <$> executeModelNextWeek (a, p', t, f, m)
 
     BLC.putStrLn $ (if outType prg == OutJSON then encode else A.encodePretty) out
 
@@ -204,6 +206,10 @@ printItemFutures = toJSON . map p
         , "modelid"  .= itemFutureModel fut
         , "params"   .= fromMaybe (String "ERROR: params could not be parsed") (decodeStrict (itemFutureParams fut))
         ]
+
+resultCombine :: Result Object -> Value
+resultCombine Result{..} = toJSON
+    $ zipWith (\c v -> object [ "clock" .= c, "value" .= v]) (V.toList reClocks) (V.toList reValues)
 
 -- * History stuff
 
