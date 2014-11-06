@@ -147,13 +147,13 @@ executeModel :: (V.Vector Epoch -> V.Vector Epoch) -- ^ Build Event.drawFuture b
              -> (DefParams -> DefParams) -- ^ Modify params relevant inside habbix
              -> FutureDrawData
              -> Habbix (Event Object, Result Object)
-executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value _futureid, Value model) = do
+executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value futId, Value model) = do
 
     -- $debug
     -- liftIO . putStrLn $ "Running predictions for item " ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
 
-    case  decodeStrict' params of
-        Just p -> do
+    case  eitherDecodeStrict' params of
+        Right p -> do
 
             nowEpoch <- liftIO getCurrentEpoch
 
@@ -171,7 +171,9 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value _
                 Left err   -> error $ "Could not parse the model response: " ++ err
                 Right res' -> return (ev, res')
 
-        Nothing -> error $ "item_future.params is BROKEN for id = " ++ show (fromSqlKey itemid)
+        Left er -> error $
+            "params could not be parsed: " ++ er ++
+            " (item_future.id = " ++ show (fromSqlKey futId) ++ ")"
 
 -- | Execute forecast model named @name@ in @forecast_models/<name>@ with
 -- given event and return result.
