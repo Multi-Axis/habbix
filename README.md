@@ -6,19 +6,64 @@
 
 ## Configuration
 
-Copy the file `config.default.yaml` to `config.yaml` and edit the parameters in
-it.
+Copy the file `config.default.yaml` to `./config.yaml` and edit the parameters
+in it.
 
-Make sure both databases exist.
+We require access to two databases, our own "local" database and the zabbix,
+"remote", database **Make sure both databases are reachable.**
 
 ## Usage
 
-- Create local database schema: `habbix migratedb`.
-- Populate or update local db with data from remote db: `habbix sync -s600`.
-- Update recent history data only `habbix sync`
+Running `habbix --help`:
 
-Careful with the populate/update outputs, by default they output a *lot* of
-debug msgs to stderr.
+    habbix [COMMAND] ... [OPTIONS]
+    
+    Commands:
+      hosts      List all hosts and groups except templates
+      apps       List available "metric groups" for the Host ID
+      items      List available "metrics" in the metric group App ID>
+      history    Print history data for <itemid>
+      future     List all item futures
+      models     List available future models
+      migratedb  Create or update the local DB schema
+      sync       Synchronize remote db with local and run futures
+      configure  Configure the predictions in database
+      execute    Execute item_future.ID but only output the results, instead of
+                 modifying database
+      compare    Compare predictions from knowing A to an actual history B
+    
+    Common flags:
+      -c --config=FILE       yaml config file (default: ./config.yaml)
+      -h --human --outhuman  Human-readable JSON output
+      -j --json --outjson    Bare JSON output
+      -? --help              Display help message
+      -V --version           Print version information
+      -v --verbose           Loud verbosity
+      -q --quiet             Quiet verbosity
+
+Habbix subcommands can be broken up into categories:
+
+- Modify the database (`migratedb sync configure`)
+- Just fetch info from database (`hosts apps items history future models`)
+- Forecasting (does *not* modify the db in any way) (`execute compare`)
+
+Run `habbix subcommand --help` to see additional parameters.
+
+STDOUT is always json and by default formatted human-readable (`--human`). You
+can output bare json without newlines with (`--json`).
+
+### `habbix migratedb`
+
+Creates the local database schema. (Or migrates if it exists already)
+
+### `habbix sync`
+
+Populate or update local db with data from remote db: `habbix sync`.
+
+Update the future of a specific item_future.id: `habbix sync -i 2`.
+
+Careful with the populate/update outputs when running with --`verbose`! There
+is a lot of sql debug msgs.
 
 ## Futures
 
