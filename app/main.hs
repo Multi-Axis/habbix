@@ -209,7 +209,7 @@ printItemFutures = toJSON . map p
 
 resultCombine :: Result Object -> Value
 resultCombine Result{..} = toJSON
-    $ zipWith (\c v -> object [ "clock" .= c, "value" .= v]) (V.toList reClocks) (V.toList reValues)
+    $ zipWith (\c v -> object [ "clock" .= c, "val" .= v]) (V.toList reClocks) (V.toList reValues)
 
 -- * History stuff
 

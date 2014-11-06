@@ -207,7 +207,7 @@ futureCompare i (sf, ef) (sr, er) = do
     (_, Result{..}) <- executeModel (V.takeWhile (<= ef) . V.dropWhile (< sf)) (const $ DefParams Nothing Nothing) x
     (_, realValues) <- getDoubleHistory i $ DefParams (Just sr) (Just er)
 
-    return $ "Spearman: " ++ show (spearman reValues realValues)
+    return $ "Spearman: " ++ show (spearman reValues $ V.convert realValues)
 #else
 futureCompare _ _ _ = error "habbix was not compiled with -fstatistics"
 #endif
