@@ -68,7 +68,7 @@ prgConf = modes
                                  ]
                 , config  = "config.yaml" &= typFile &= help "yaml config file (default: ./config.yaml)"
                 } &= help "List all hosts and groups except templates"
-    , Apps      { argid   = def &= opt (-1 :: Int64) &= argPos 0 &= typ "ID"
+    , Apps      { argid   = (-1) &= argPos 0 &= typ "ID"
                 } &= help "List available \"metric groups\" for the Host ID"
     , Items     { } &= help "List available \"metrics\" in the metric group App ID>"
     , History   { samples = 80 &= help "Sample resolution (default 80)"
@@ -83,13 +83,13 @@ prgConf = modes
     , Sync      { syncAll     = False &= help "Sync every table, not just history"
                 , itemsToSync = [] &= help "Optional item_future.id's to sync"
                 } &= help "Synchronize remote db with local and run futures"
-    , Configure { executable = def &= opt ("" :: String) &= typFile        &= help "Register a new forecast model"
-                , item       = def &= opt (-1 :: Int64)  &= typ "ITEMID"   &= help "Create a new item_future"
-                , model      = def &= opt (-1 :: Int64)  &= typ "MODELID"  &= help "Model to register on the new item_future"
+    , Configure { executable = ""   &= typFile        &= help "Register a new forecast model"
+                , item       = (-1) &= typ "ITEMID"   &= help "Create a new item_future"
+                , model      = (-1) &= typ "MODELID"  &= help "Model to register on the new item_future"
                 } &= help "Configure the predictions in database"
     -- Info
     , Execute   { -- argid
-                  params = def &= opt ("" :: String) &= typ "JSON"
+                  params = "" &= typ "JSON"
                 } &= help "Execute item_future.ID but only output the results, instead of modifying database"
     , Compare   { -- argid
                   fromInterval = def &= help "Interval to use with predictions"
