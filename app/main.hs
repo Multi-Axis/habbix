@@ -35,6 +35,13 @@ import           Database.Esqueleto              (toSqlKey, Entity(..))
 import qualified Database.Persist           as P
 import           System.Console.CmdArgs
 
+-- | Inserted by MigrateDb
+defaultMetricNames :: [Metric]
+defaultMetricNames =
+    [ Metric "mem" "system.stat[memory,fre]"
+    , Metric "cpu" "system.cpu.load[percpu,avg5]"
+    ]
+
 data Config = Config
             { localDatabase :: ConnectionString
             , zabbixDatabase :: ConnectionString
@@ -119,7 +126,9 @@ main = do
         Future{..}  -> printItemFutures  <$> runLocalDB (P.selectList [] [])
         Models{..}  -> printFutureModels <$> runLocalDB (P.selectList [] [])
 
-        MigrateDb{..} -> runLocalDB (E.runMigration migrateAll) >> return (String "done")
+        MigrateDb{..} -> do
+            runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
+            return (String "done")
         Sync{..}      -> do
             when syncAll populateZabbixParts
             case itemsToSync of
@@ -133,9 +142,9 @@ main = do
                 return $ String "done"
 
             | item < 0 || model < 0 -> error "Provide either --executable or (ID and --model)"
-            | otherwise             ->
-                runLocalDB (P.insert_ $ ItemFuture (toSqlKey item) (toSqlKey model) "{}" "{}")
-                >> return (String "done")
+            | otherwise             -> do
+                runLocalDB (P.insert_ $ ItemFuture (toSqlKey item) (toSqlKey model) "{}" "{}" False)
+                return (String "done")
 
         Compare{..}
             | argid < 0 -> error "itemFutureId must be >= 0"

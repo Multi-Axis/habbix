@@ -96,6 +96,7 @@ ItemFuture
     model       FutureModelId   sql=modelid
     params      ByteString
     details     ByteString
+    isMaster    Bool            default=false -- Is this the default ItemFuture for the item
     deriving Show
 
 -- wrt history
@@ -112,9 +113,17 @@ FutureUint
     value       Rational
     deriving Show
 
+-- like 'y = threshold' lines in graphs
 Threshold
     item        ItemFutureId    sql=itemid
     lower       Bool
     value       Double
+    deriving Show
+
+-- attach pretty names (cpu, mem) to zabbix items
+Metric
+    name        Text
+    key_        Text
+    UniqueMetricName name key_
     deriving Show
 |]
