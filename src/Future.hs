@@ -9,7 +9,23 @@
 -- Stability      : experimental
 -- Portability    : non-portable
 ------------------------------------------------------------------------------
-module Future where
+module Future
+    ( -- * Forecast interface
+    Event(..), Result(..),
+
+    -- * Future and history
+    runFuture, executeFutures, executeFutures',
+    getItemFutures, historyVectors,
+    DP, getDP,
+
+    -- * Models
+    runModel, executeModel, executeModelNextWeek
+
+#ifdef STATISTICS
+    -- * Statistical
+    , futureCompare
+#endif
+    ) where
 
 import ZabbixDB
 import Query
@@ -17,9 +33,10 @@ import Query
 import           Control.Monad
 import           Control.Applicative
 import           Control.Arrow
+import           Control.Monad.Logger
 import           Control.Monad.IO.Class
 import           Data.Maybe
-import           Data.Time
+import           Data.Monoid
 import           Data.Aeson hiding (Value, Result)
 import           Data.Aeson.TH
 import qualified Data.ByteString      as B
@@ -33,7 +50,8 @@ import qualified Data.Vector          as DV
 import           Database.Esqueleto
 import qualified Database.Persist as P
 import           Database.Persist.Quasi (PersistSettings(psToDBName), lowerCaseSettings)
-import           System.Process (readProcess)
+import           System.Process (readProcessWithExitCode)
+import           System.Exit
 
 #ifdef STATISTICS
 import           Numeric.Statistics
@@ -44,15 +62,15 @@ import           Numeric.Statistics
 data Event params = Event
            { evValueType :: Int
            , evClocks :: V.Vector Epoch
-           , evValues :: V.Vector Double
-           , evLast :: (Epoch, Double) -- ^ Last value in history
+           , evValues :: V.Vector Double -- ^ (converted from Rational)
+           , evLast :: Maybe (Epoch, Double) -- ^ Last value in history (converted from rational)
            , evDrawFuture :: V.Vector Epoch
            , evParams :: params
            } deriving (Show)
 
 data Result details = Result
             { reClocks :: V.Vector Epoch
-            , reValues :: V.Vector Double
+            , reValues :: V.Vector Double -- ^ (converted to rational)
             , reDetails :: details
             } deriving (Show)
 
@@ -71,18 +89,23 @@ $(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSe
 executeFutures' :: Maybe [ItemFutureId] -> Habbix ()
 executeFutures' mis = do
     xs <- getItemFutures mis
-    forM_ xs $ \dd -> executeModelNextWeek dd >>= replacePredictionInDB dd
+    forM_ xs $ \dd -> do
+        r <- executeModelNextWeek dd
+        case r of
+            Right r' -> replacePredictionInDB dd r'
+            Left er  -> logErrorN $ pack er
 
 -- | Run forecast models against managed item histories.
-executeFutures :: Maybe [ItemFutureId] -> Habbix [(Event Object, Result Object)]
+executeFutures :: Maybe [ItemFutureId] -> Habbix [Either String (Event Object, Result Object)]
 executeFutures = getItemFutures >=> mapM executeModelNextWeek
 
-runFuture :: ItemFutureId -> Habbix (Event Object, Result Object)
+runFuture :: ItemFutureId -> Habbix (Either String (Event Object, Result Object))
 runFuture futId = head <$> executeFutures (Just [futId])
 
 -- | Update respective tables in the local db.
 replacePredictionInDB :: FutureDrawData -> (Event Object, Result Object) -> Habbix ()
-replacePredictionInDB (_,_, Value vtype, Value futId, _)  (_, res) = runLocalDB $ replaceFuture futId vtype res
+replacePredictionInDB (_,_,_, Value futId, _)  (_, res) =
+        runLocalDB $ replaceFuture futId res
 
 -- * Query history and prediction configuration data
 
@@ -91,7 +114,7 @@ type FutureDrawData =
         -- ^ (items.itemid, item_future.params, items.value_type,
         -- item_future.id, future_model.name)
 
-type Points n = (V.Vector Epoch, DV.Vector n)
+type DP = (V.Vector Epoch, DV.Vector Rational)
 
 getItemFutures :: Maybe [ItemFutureId] -> Habbix [FutureDrawData]
 getItemFutures mis = runLocalDB . select . from $ \(item `InnerJoin` itemFut `InnerJoin` futModel) -> do
@@ -104,41 +127,23 @@ getItemFutures mis = runLocalDB . select . from $ \(item `InnerJoin` itemFut `In
            , itemFut  ^. ItemFutureId
            , futModel ^. FutureModelName )
 
-getDoubleHistory :: ItemFutureId -> DefParams -> Habbix (V.Vector Epoch, DV.Vector Double)
-getDoubleHistory i params = do
+getDP :: ItemFutureId -> DefParams -> Habbix DP
+getDP i DefParams{..} = do
     Just ItemFuture{..} <- runLocalDB $ get i
     Just Item{..}       <- runLocalDB $ get itemFutureItem
     nowEpoch            <- liftIO getCurrentEpoch
 
-    let query = uncurry (selectHistory' itemFutureItem itemValueType) $ buildQueries nowEpoch params
-    runLocalDB $ either (historyVectors >=> return . second (V.convert . DV.map realToFrac))
-                        (historyVectors >=> return . second (V.convert . DV.map fromIntegral))
-                 query
+    let query = selectHistory' itemFutureItem nowEpoch pStopLower pStopUpper
+    runLocalDB $ historyVectors query
 
--- | This looks at pStopLower and pStopUpper on the params and builds
--- queries to filter history (first part of the tuple) or
--- historyUint (snd) columns based on them.
-buildQueries :: (Esqueleto m1 expr1 backend1, Esqueleto m expr backend)
-             => Epoch -- ^ Today (where pStopLower is relative to when it is < 0)
-             -> DefParams
-             -> (expr (Entity History) -> m (), expr1 (Entity HistoryUint) -> m1 ())
-buildQueries today DefParams{..} =
-    (\h -> do
-        withMaybe pStopLower $ \l -> where_ $ h ^. HistoryClock >=. val (if l < 0 then today + l else l)
-        withMaybe pStopUpper $ \u -> where_ $ h ^. HistoryClock <=. val u
-    , \h -> do
-        withMaybe pStopLower $ \l -> where_ $ h ^. HistoryUintClock >=. val (if l < 0 then today + l else l)
-        withMaybe pStopUpper $ \u -> where_ $ h ^. HistoryUintClock <=. val u
-    )
-
-historyVectors :: DPS n -> DB (Points n)
+historyVectors :: DPS -> DB DP
 historyVectors src = do
     xs <- src $$ CL.consume
     return (V.fromList (map fst xs), DV.fromList (map snd xs))
 
 -- * Run models
 
-executeModelNextWeek :: FutureDrawData -> Habbix (Event Object, Result Object)
+executeModelNextWeek :: FutureDrawData -> Habbix (Either String (Event Object, Result Object))
 executeModelNextWeek dd = do
     iv <- liftIO nextWeek
     executeModel (const iv) id dd
@@ -147,34 +152,31 @@ executeModelNextWeek dd = do
 executeModel :: (V.Vector Epoch -> V.Vector Epoch) -- ^ Build Event.drawFuture based on the history clocks
              -> (DefParams -> DefParams) -- ^ Modify params relevant inside habbix
              -> FutureDrawData
-             -> Habbix (Event Object, Result Object)
+             -> Habbix (Either String (Event Object, Result Object))
 executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value futId, Value model) = do
 
-    -- $debug
-    -- liftIO . putStrLn $ "Running predictions for item " ++ show (fromSqlKey itemid) ++ " and model " ++ unpack model
+    logInfoN $ "Run future for future item " <> tshow (fromSqlKey futId) <> " (model " <> model <> ")"
 
     case  eitherDecodeStrict' params of
         Right p -> do
+            let DefParams{..} = fParams p
 
             nowEpoch <- liftIO getCurrentEpoch
 
-            let (histQuery, uintQuery) = buildQueries nowEpoch (fParams p)
-            let query                  = selectHistory' itemid vtype histQuery uintQuery
+            (cs, hs) <- runLocalDB
+                $ (historyVectors >=> return . second (V.convert . DV.map fromRational))
+                $ selectHistory' itemid nowEpoch pStopLower pStopUpper
 
-            (cs, hs) <- runLocalDB $ either (historyVectors >=> return . second (V.convert . DV.map realToFrac))
-                                            (historyVectors >=> return . second (V.convert . DV.map fromIntegral))
-                                     query
+            tick <- runLocalDB $ selectHistoryLast itemid
+            let ev = Event vtype cs hs (fmap (second fromRational) tick)
+                        (futClocks cs) (fromJust $ decodeStrict' params)
 
-            tick <- runLocalDB $ selectLastHistoryTick itemid vtype
+            r <- runModel model ev
+            return $ case r of
+                Right r' -> Right (ev, r')
+                Left er  -> Left $ "future item " ++ show (fromSqlKey futId) ++ " failed: " ++ er
 
-            let ev = Event vtype cs hs tick (futClocks cs) (fromJust $ decodeStrict' params)
-
-            res <- runModel model ev
-            case res of
-                Left err   -> error $ "Could not parse the model response: " ++ err
-                Right res' -> return (ev, res')
-
-        Left er -> error $
+        Left er -> return $ Left $
             "params could not be parsed: " ++ er ++
             " (item_future.id = " ++ show (fromSqlKey futId) ++ ")"
 
@@ -183,48 +185,34 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value f
 runModel :: Text -> Event Object -> Habbix (Either String (Result Object))
 runModel name ev = do
     let filename = "forecast_models/" ++ unpack name
-    res <- liftIO $ readProcess filename [] (unpack . decodeUtf8 . B.concat . BL.toChunks $ encode ev)
-    return . eitherDecodeStrict' . encodeUtf8 $ pack res
+    (ec, stdout, _) <- liftIO $ readProcessWithExitCode filename [filename] (unpack . decodeUtf8 . B.concat . BL.toChunks $ encode ev)
+    return $ case ec of
+        ExitSuccess -> eitherDecodeStrict' . encodeUtf8 $ pack stdout
+        ExitFailure _ -> Left stdout
 
 -- | Replaces the future with given result.
-replaceFuture :: Key ItemFuture -> Int -> Result Object -> DB ()
-replaceFuture futid 0 Result{..} = do
+replaceFuture :: Key ItemFuture -> Result Object -> DB ()
+replaceFuture futid Result{..} = do
     delete . from $ \fut -> where_ (fut ^. FutureItem ==. val futid)
-    liftIO $ print reDetails
     P.update futid [ItemFutureDetails P.=. B.concat (BL.toChunks (encode reDetails))]
     P.insertMany_ $ zipWith (\c v -> Future futid c (realToFrac v)) (V.toList reClocks) (V.toList reValues)
 
-replaceFuture futid 3 Result{..} = do
-    delete . from $ \futuint -> where_ (futuint ^. FutureUintItem ==. val futid)
-    P.update futid [ItemFutureDetails P.=. B.concat (BL.toChunks (encode reDetails))]
-    P.insertMany_ $ zipWith (\c v -> FutureUint futid c (toRational v)) (V.toList reClocks) (V.toList reValues)
-
-replaceFuture _     n _          = error $ "unknown value_type: " ++ show n
-
 -- * Statistical
 
-futureCompare :: ItemFutureId -> (Epoch, Epoch) -> (Epoch, Epoch) -> Habbix String
 #ifdef STATISTICS
+futureCompare :: ItemFutureId -> (Epoch, Epoch) -> (Epoch, Epoch) -> Habbix String
 futureCompare i (sf, ef) (sr, er) = do
     (x:_)           <- getItemFutures (Just [i])
-    (_, Result{..}) <- executeModel (V.takeWhile (<= ef) . V.dropWhile (< sf)) (const $ DefParams Nothing Nothing) x
-    (_, realValues) <- getDoubleHistory i $ DefParams (Just sr) (Just er)
+    Right (_, Result{..}) <- executeModel (V.takeWhile (<= ef) . V.dropWhile (< sf)) (const $ DefParams Nothing Nothing) x
+    (_, realValues) <- getDP i $ DefParams (Just sr) (Just er)
 
-    return $ "Spearman: " ++ show (spearman reValues $ V.convert realValues)
-#else
-futureCompare _ _ _ = error "habbix was not compiled with -fstatistics"
+    return $ "Spearman: " ++ show (spearman reValues $ V.convert $ DV.map fromRational realValues)
 #endif
 
 -- * Utility
-
-withMaybe :: Monad m => Maybe a -> (a -> m ()) -> m ()
-withMaybe m f = maybe (return ()) f m
 
 -- | Epoch timestamps for every day next week
 nextWeek :: IO (V.Vector Epoch)
 nextWeek = do
     curEpoch <- getCurrentEpoch
     return $ V.fromList [curEpoch, curEpoch + 86400 .. curEpoch + 7 * 86401]
-
-getCurrentEpoch :: IO Epoch
-getCurrentEpoch = read . formatTime undefined "%s" <$> getCurrentTime

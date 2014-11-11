@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 ------------------------------------------------------------------------------
 -- | 
 -- Module         : Query
@@ -7,18 +8,37 @@
 -- Stability      : experimental
 -- Portability    : non-portable
 ------------------------------------------------------------------------------
-module Query where
+module Query
+    ( -- * Host and app info
+    selectHosts, selectHostApplications, selectAppItems,
+
+    -- * History and trends
+    DPS, selectHistory, selectHistory', selectHistoryLast,
+    selectHistoryMax,
+    
+    -- * Future
+    newItemFuture,
+
+    -- * Populate from remote
+    populateZabbixParts, populateDefaultFutures, populateAll,
+
+    -- * General utility
+    withMaybe, getCurrentEpoch
+    ) where
 
 import ZabbixDB
 
-import           Data.Ratio (numerator)
-import           Data.List.HT (sliceHorizontal)
+import           Data.List.HT as L (sliceHorizontal)
+import           Data.Monoid
+import           Control.Applicative
 import           Control.Monad
-import           Control.Arrow
+import           Control.Monad.Logger
+import           Control.Monad.IO.Class
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Database.Esqueleto
 import qualified Database.Persist as P
+import           Data.Time
 
 valid :: IsSqlKey a => a -> Bool
 valid = (>= 0) . fromSqlKey
@@ -65,83 +85,81 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 
 -- * History data points
 
-type DPS val = Source DB (Epoch, val)
+type DPS = Source DB (Epoch, Rational)
 
 -- | Get all history for given item.
-selectHistory :: ItemId -- ^ Key to item
-              -> Int    -- ^ value_type
-              -> Either (DPS FixedE4) (DPS Integer)
-selectHistory iid vtype = selectHistory' iid vtype
-    (\_ -> return ())
-    (\_ -> return ())
+selectHistory :: ItemId -> DPS
+selectHistory iid = selectHistory' iid undefined Nothing Nothing
 
--- | Get all history for given item.
-selectHistory' :: Key Item -- ^ Key to item
-              -> Int      -- ^ value_type
-              -> (SqlExpr (Entity History) -> SqlQuery ())
-              -> (SqlExpr (Entity HistoryUint) -> SqlQuery ())
-              -> Either (DPS FixedE4) (DPS Integer)
-selectHistory' iid vtype muHist muHistUint =
-    unwrap $ case vtype of
-
-        0 -> Left . selectSource . from $ \history -> do
+-- | Get all history for given item, vtype == 0 or 3.
+selectHistory' :: ItemId
+               -> Epoch -- ^ Current time (for relative From)
+               -> Maybe Epoch -- ^ From
+               -> Maybe Epoch -- ^ To
+               -> DPS
+selectHistory' iid time a b =
+    let hists = selectSource . from $ \history -> do
             where_ $ history ^. HistoryItem ==. val iid
-            muHist history
+            queryParams time a b HistoryClock history
             orderBy [asc $ history ^. HistoryClock]
             return (history ^. HistoryClock, history ^. HistoryValue)
 
-        1 -> error "selectHistory: historyString not implemented"
-        2 -> error "selectHistory: What the f*ck is value_type = 2?"
+        trends = selectSource . from $ \trend -> do
+            where_ $ trend ^. TrendItem ==. val iid
+            queryParams time a b TrendClock trend
+            orderBy [asc $ trend ^. TrendClock]
+            return (trend ^. TrendClock, trend ^. TrendValueAvg) -- TODO min/max/avg
 
-        3 -> Right . selectSource . from $ \histUint -> do
-            where_ (histUint ^. HistoryUintItem ==. val iid)
-            muHistUint histUint
-            orderBy [asc $ histUint ^. HistoryUintClock]
-            return (histUint ^. HistoryUintClock, histUint ^. HistoryUintValue)
+    in mapOutput (\(Value x, Value y) -> (x, y)) (trends <> hists)
 
-        4 -> error "selectHistory: value_type = 4, huh?"
-        _ -> error "selectHistory: items.value_type over 4"
+-- | This looks at pStopLower and pStopUpper on the params and builds
+-- queries to filter history (first part of the tuple) or
+-- historyUint (snd) columns based on them.
+queryParams :: (PersistEntity val, Esqueleto m expr backend)
+            => Epoch -- ^ Today (where pStopLower is relative to when it is < 0)
+            -> Maybe Epoch
+            -> Maybe Epoch
+            -> EntityField val Epoch
+            -> expr (Entity val)
+            -> m ()
+queryParams today pStopLower pStopUpper field h = do
+    withMaybe pStopLower $ \l -> where_ $ h ^. field >=. val (if l < 0 then today + l else l)
+    withMaybe pStopUpper $ \u -> where_ $ h ^. field <=. val u
+
+selectHistoryMax :: ItemId -> DB (Maybe Rational)
+selectHistoryMax iid = fmap unwrap . select . from $ \history -> do
+    where_ (history ^. HistoryItem ==. val iid)
+    return $ max_ (history ^. HistoryValue)
     where
-        unwrap (Left ints) = Left (ints $= CL.map (unValue *** unValue))
-        unwrap (Right fxd) = Right (fxd $= CL.map (unValue *** numerator . unValue))
-                                            -- only numerator because
-                                            -- numeric(20,0)
+        unwrap [(Value n)] = n
+        unwrap _           = Nothing
 
--- selectMax :: Key Item -> Int -> _
-selectMaxDouble iid vtype = case vtype of
-    0 -> fmap (unwrap realToFrac) . select . from $ \history -> do
-        where_ (history ^. HistoryItem ==. val iid)
-        return $ max_ (history ^. HistoryValue)
-    3 -> fmap (unwrap fromRational) . select . from $ \huint -> do
-        where_ (huint ^. HistoryUintItem ==. val iid)
-        return $ max_ (huint ^. HistoryUintValue)
-    _ -> error $ "valuetype " ++ show vtype ++ " not supported"
-  where
-    unwrap :: (a -> b) -> [Value (Maybe a)] -> b
-    unwrap f [Value (Just n)] = f n
-    unwrap _ _ = error $ "Max value not found for itemid = " ++ show iid
+selectHistoryLast :: ItemId -> DB (Maybe (Epoch, Rational))
+selectHistoryLast iid = fmap unwrapFirst . select . from $ \history -> do
+    where_ (history ^. HistoryItem ==. val iid)
+    orderBy [desc (history ^. HistoryClock)] 
+    limit 1
+    return (history ^. HistoryClock, history ^. HistoryValue)
 
-selectLastHistoryTick iid vtype = case vtype of
-    0 -> fmap (unwrap realToFrac) . select . from $ \history -> do
-        where_ (history ^. HistoryItem ==. val iid)
-        orderBy [desc (history ^. HistoryClock)] 
-        limit 1
-        return (history ^. HistoryClock, history ^. HistoryValue)
-    3 -> fmap (unwrap fromRational) . select . from $ \huint -> do
-        where_ (huint ^. HistoryUintItem ==. val iid)
-        orderBy [desc (huint ^. HistoryUintClock)] 
-        limit 1
-        return (huint ^. HistoryUintClock, huint ^. HistoryUintValue)
-    _ -> error $ "valuetype " ++ show vtype ++ " not supported"
-  where
-    unwrap :: (a -> b) -> [(Value Epoch, Value a)] -> (Epoch, b)
-    unwrap f [(Value e, Value n)] = (e, f n)
-    unwrap _ _ = error $ "Last tick not found for itemid = " ++ show iid
+selectTrendLast :: ItemId -> DB (Maybe (Epoch, Rational))
+selectTrendLast iid = fmap unwrapFirst . select . from $ \trend -> do
+    where_ (trend ^. TrendItem ==. val iid)
+    orderBy [desc (trend ^. TrendClock)] 
+    limit 1
+    return (trend ^. TrendClock, trend ^. TrendValueAvg)
+
+selectItemsWithFuture :: DB [(Value ItemId, Value Int)]
+selectItemsWithFuture = selectDistinct . from $ \(items `InnerJoin` itemfuture) -> do
+        on (items ^. ItemId ==. itemfuture ^. ItemFutureItem)
+        return (items ^. ItemId, items ^. ItemValueType)
 
 -- * Populate
 
+newItemFuture :: ItemId -> FutureModelId -> Bool -> Habbix ItemFutureId
+newItemFuture i m = runLocalDB . P.insert . ItemFuture i m "{}" "{}"
+
 -- | Fetch zabbix data (from remote to local) for all zabbix-tables except
--- history and history_uint.
+-- history and trends
 populateZabbixParts :: Habbix ()
 populateZabbixParts = do
     selectRepsert ([] :: [P.Filter Group]) []
@@ -155,49 +173,118 @@ populateZabbixParts = do
                                         >>= runLocalDB . mapM_ repsertEntity
         repsertEntity (Entity key v) = P.repsert key v
 
+-- | Adds default item_futures to those items that do not have any.
+--
+-- Items to add must satisfy:
+--    - key_ must be in metric table
+--    - hostid must not be in the Templates host group (groupid = 1)
+--    - the itemid must not be present in any row of item_future
+populateDefaultFutures :: Habbix ()
+populateDefaultFutures = do
+    -- find items that do not have futures
+    nf <- runLocalDB $ select $ from $ \item -> do
+        where_ $ item ^. ItemKey_ `in_`
+                subList_selectDistinct (from $ \metric -> return (metric ^. MetricKey_))
+            &&. item ^. ItemHost `in_`
+                subList_selectDistinct (from $ \hg -> do where_ (hg ^. HostGroupGroup !=. val (toSqlKey 1))
+                                                         return (hg ^. HostGroupHost)
+                                       )
+            &&. item ^. ItemId `notIn`
+                subList_selectDistinct (from $ \f -> return $ f ^. ItemFutureItem)
+        return (item ^. ItemId)
+
+    -- check if there is a model to assign
+    mmod <- runLocalDB $ P.selectFirst [] []
+    case mmod of
+        Nothing -> logErrorN "There are no models in db. Cannot assign futures. Please add a model first"
+        Just (Entity m _) -> mapM_ (\(Value i) -> newItemFuture i m True) nf
+
 -- | Fetch zabbix history data (from remote to local) for all items present
--- in the managed_item table.
-populateHistory :: Habbix ()
-populateHistory = do
-    items <- runLocalDB . selectDistinct . from $ \(items `InnerJoin` itemfuture) -> do
-        on (items ^. ItemId ==. itemfuture ^. ItemFutureItem)
-        return (items ^. ItemId, items ^. ItemValueType)
+-- in the item_future table.
+populateAll :: Habbix ()
+populateAll = do
+    items <- runLocalDB selectItemsWithFuture
+    forM_ items $ \(Value i, Value t) -> do
+        logDebugN $ "Populating itemid = " <> tshow i
+        populateHistoryFor i t
+        populateTrendsFor i t
 
-    forM_ items $ \(Value iid, Value vtype) ->
-        case vtype of
-            -- history
-            0 -> do
-                hmax <- fmap unvalueFirst . runLocalDB . select . from $ \history -> do
-                    where_ (history ^. HistoryItem ==. val iid)
-                    return (max_ (history ^. HistoryClock))
+populateHistoryFor :: ItemId -> Int -> Habbix ()
+populateHistoryFor iid vtype = do
+    -- Get last tick
+    lastClock <- runLocalDB (selectHistoryLast iid) >>= \x -> case x of
+        Just (n, _) -> return n
+        Nothing -> do
+            logInfoN ("Item (itemid = " <> tshow iid <> ") has no history yet. Populating it from scratch. This may take a while")
+            return 0
+    twoWeeks <- liftIO twoWeeksAgo
 
-                hs <- runRemoteDB . select . from $ \history -> do
-                    where_ (history ^. HistoryClock >. val hmax &&. history ^. HistoryItem ==. val iid)
-                    return ( history ^. HistoryItem
-                           , history ^. HistoryClock
-                           , history ^. HistoryValue
-                           , history ^. HistoryNs)
+    let toHistory (Value c, Value v) = History iid c v
 
-                mapM_ (runLocalDB . insertMany_ . map toHistory) $ sliceHorizontal 1000 hs
+    -- delete older than two weeks
+    runLocalDB . delete . from $ \h -> where_ (h ^. HistoryClock <. val twoWeeks)
 
-            -- history_uint
-            3 -> do
-                intmax <- fmap unvalueFirst . runLocalDB . select . from $ \history -> do
-                    where_ (history ^. HistoryUintItem ==. val iid)
-                    return (max_ (history ^. HistoryUintClock))
+    vals <- runRemoteDB $ case vtype of
+        0 -> selectZabHist iid (max lastClock twoWeeks)
+        3 -> selectZabHistUint iid (max lastClock twoWeeks)
+        _ -> do
+            logErrorN $ "Item (itemid = " <> tshow iid <> ") has unknown value_type (" <> tshow vtype <> ")"
+            return []
 
-                uints <- runRemoteDB . select . from $ \history -> do
-                    where_ (history ^. HistoryUintClock >. val intmax &&. history ^. HistoryUintItem ==. val iid)
-                    return ( history ^. HistoryUintItem
-                           , history ^. HistoryUintClock
-                           , history ^. HistoryUintValue
-                           , history ^. HistoryUintNs)
+    insertMany_' $ map toHistory vals
 
-                mapM_ (runLocalDB . insertMany_ . map toHistoryUint) $ sliceHorizontal 1000 uints
-            _ -> error "Uknown value_type"
-    where
-        toHistory (Value i, Value c, Value v, Value n) = History i c v n
-        toHistoryUint (Value i,Value c,Value v,Value n) = HistoryUint i c v n
+populateTrendsFor :: ItemId -> Int -> Habbix ()
+populateTrendsFor iid vtype = do
+    lastClock <- runLocalDB (selectTrendLast iid) >>= \x -> case x of
+        Just (n, _) -> return n
+        Nothing -> do
+            logInfoN ("Item (itemid = " <> tshow iid <> ") has no trend history yet. Populating it from scratch. This may take a while")
+            return 0
+    vals <- runRemoteDB $ case vtype of
+        0 -> selectZabTrend iid lastClock
+        3 -> selectZabTrendUint iid lastClock
+        _ -> do
+            logErrorN $ "Item (itemid = " <> tshow iid <> ") has unknown value_type (" <> tshow vtype <> ")"
+            return []
+    let toTrend (Value clock, Value a, Value b, Value c) = Trend iid clock a b c
+    insertMany_' $ map toTrend vals
 
-        unvalueFirst [Value (Just x)] = x
-        unvalueFirst _                = 0
+insertMany_' :: (PersistEntity p, PersistEntityBackend p ~ Connection) => [p] -> Habbix ()
+insertMany_' = mapM_ (runLocalDB . insertMany_) . L.sliceHorizontal 1000
+
+-- * Zab
+
+selectZabHist, selectZabHistUint :: ItemId -> Epoch -> DB [(Value Int, Value Rational)]
+selectZabHist iid lc = select . from $ \history -> do
+    where_ $ history ^. ZabHistClock >. val lc
+         &&. history ^. ZabHistItem ==. val iid
+    return (history ^. ZabHistClock, history ^. ZabHistValue)
+selectZabHistUint iid lc = select . from $ \history -> do
+    where_ $ history ^. ZabHistUintClock >. val lc
+         &&. history ^. ZabHistUintItem ==. val iid
+    return (history ^. ZabHistUintClock, history ^. ZabHistUintValue)
+
+selectZabTrend, selectZabTrendUint :: ItemId -> Epoch -> DB [(Value Int, Value Rational, Value Rational, Value Rational)]
+selectZabTrend iid lc = select . from $ \trend -> do
+    where_ $ trend ^. ZabTrendClock >. val lc
+         &&. trend ^. ZabTrendItem ==. val iid
+    return (trend ^. ZabTrendClock, trend ^. ZabTrendValueMin, trend ^. ZabTrendValueAvg, trend ^. ZabTrendValueMax)
+selectZabTrendUint iid lc = select . from $ \trend -> do
+    where_ $ trend ^. ZabTrendUintClock >. val lc
+         &&. trend ^. ZabTrendUintItem ==. val iid
+    return (trend ^. ZabTrendUintClock, trend ^. ZabTrendUintValueMin, trend ^. ZabTrendUintValueAvg, trend ^. ZabTrendUintValueMax)
+
+-- * Utility
+
+twoWeeksAgo :: IO Epoch
+twoWeeksAgo = (\x -> x - 14 * 86400) <$> getCurrentEpoch
+
+getCurrentEpoch :: IO Epoch
+getCurrentEpoch = read . formatTime undefined "%s" <$> getCurrentTime
+
+unwrapFirst :: [(Value a, Value b)] -> Maybe (a, b)
+unwrapFirst [(Value e, Value n)] = Just (e, n)
+unwrapFirst _ = Nothing
+
+withMaybe :: Monad m => Maybe a -> (a -> m ()) -> m ()
+withMaybe m f = maybe (return ()) f m

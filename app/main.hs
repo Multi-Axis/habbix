@@ -21,6 +21,8 @@ import           Future
 import           Prelude
 import           Control.Applicative
 import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Logger
 import           Data.Aeson hiding (Result)
 import qualified Data.Aeson.Encode.Pretty   as A
 import qualified Data.ByteString.Lazy.Char8 as BLC
@@ -109,19 +111,18 @@ main :: IO ()
 main = do
     prg       <- cmdArgs prgConf
     Just conf <- Yaml.decodeFile (config prg)
-    debugSql  <- isLoud
+    debugInfo <- isLoud
 
-    let selHist = do item <- E.getJust (toSqlKey $ argid prg)
-                     return $ selectHistory (toSqlKey $ argid prg) (itemValueType item)
+    let selHist = selectHistory (toSqlKey $ argid prg)
 
-    out <- runHabbix debugSql (localDatabase conf) (zabbixDatabase conf) $ case prg of
+    runHabbix debugInfo (localDatabase conf) (zabbixDatabase conf) $ do
+      out <- case prg of
         Hosts{..}   -> printHosts <$> runLocalDB selectHosts
         Apps{..}    -> printApps  <$> runLocalDB (selectHostApplications $ toSqlKey argid)
         Items{..}   -> printItems <$> runLocalDB (selectAppItems $ toSqlKey argid)
         History{..}
             | argid < 0 -> error "ItemID must be >= 0"
-            | otherwise -> runLocalDB $ selHist >>= either (historyVectors >=> return . printHists . sampled samples)
-                                                           (historyVectors >=> return . printHists . sampled samples)
+            | otherwise -> printHists . sampled samples <$> runLocalDB (historyVectors selHist)
 
         Future{..}  -> printItemFutures  <$> runLocalDB (P.selectList [] [])
         Models{..}  -> printFutureModels <$> runLocalDB (P.selectList [] [])
@@ -130,10 +131,10 @@ main = do
             runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
             return (String "done")
         Sync{..}      -> do
-            when syncAll populateZabbixParts
+            when syncAll $ populateZabbixParts >> populateDefaultFutures
             case itemsToSync of
-                [] -> populateHistory >> executeFutures' Nothing >> return (String "done")
-                is -> executeFutures' (Just $ map toSqlKey is)   >> return (String "done")
+                [] -> populateAll >> executeFutures' Nothing >> return (String "done")
+                is -> executeFutures' (Just $ map toSqlKey is) >> return (String "done")
 
         Configure{..}
             | not (null executable) -> do
@@ -143,22 +144,31 @@ main = do
 
             | item < 0 || model < 0 -> error "Provide either --executable or (ID and --model)"
             | otherwise             -> do
-                runLocalDB (P.insert_ $ ItemFuture (toSqlKey item) (toSqlKey model) "{}" "{}" False)
+                _ <- newItemFuture (toSqlKey item) (toSqlKey model) False
                 return (String "done")
 
         Compare{..}
+#ifdef STATISTICS
             | argid < 0 -> error "itemFutureId must be >= 0"
             | otherwise -> String . pack <$> futureCompare (toSqlKey argid) fromInterval toInterval
+#else
+            -> error "habbix was not compared with -fstatistics"
+#endif
 
         Execute{..}
             | argid < 0 -> error "ID must be >= 0"
             | otherwise -> do
                 [(a, p, t, f, m)] <- getItemFutures $ Just [toSqlKey argid]
                 let p' = if not (null params) then E.Value (encodeUtf8 $ pack params) else p
-                (if outCombine then resultCombine else toJSON) . snd
-                    <$> executeModelNextWeek (a, p', t, f, m)
+                r <- executeModelNextWeek (a, p', t, f, m)
+                return $ case r of
+                    Right (_, r') -> (if outCombine then resultCombine else toJSON) r'
+                    Left er       -> String (pack er)
 
-    BLC.putStrLn $ (if outType prg == OutJSON then encode else A.encodePretty) out
+      case out of
+        String s -> logDebugN s
+        _        -> liftIO . BLC.putStrLn $
+            (if outType prg == OutJSON then encode else A.encodePretty) out
 
 -- * Print
 
@@ -195,7 +205,7 @@ printApps = toJSON . map p
             ]
 
 -- | Print a history item <epoch>,<value>
-printHists :: ToJSON n => Points n -> Value
+printHists :: DP -> Value
 printHists (ts, vs) = toJSON $ zipWith (\t v -> (t, toJSON v)) (V.toList ts) (DV.toList vs)
 
 -- | Print model info
@@ -223,7 +233,7 @@ resultCombine Result{..} = toJSON
 -- * History stuff
 
 -- | Sample of n evenly leaning towards end.
-sampled :: Int -> Points n -> Points n
+sampled :: Int -> DP -> DP
 sampled n (ts, vs) =
     let interval   = fromIntegral (V.length ts) / fromIntegral n :: Double
         getIndex i = floor ((fromIntegral i + 1) * interval - 1)

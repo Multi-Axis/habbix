@@ -14,12 +14,14 @@
 module ZabbixDB
     ( module ZabbixDB
     , module Models
+    , module ZabbixModels
     , ConnectionString
     ) where
 
 import Control.Applicative
+import Data.Monoid
 import Data.Int as ZabbixDB
-import FixedE4 as ZabbixDB
+import qualified Data.Text as T
 
 import Control.Monad.Logger
 import Control.Monad.Reader
@@ -27,8 +29,10 @@ import Control.Monad.Trans.Control
 import Control.Monad.Trans.Resource
 import Control.Monad.Base
 import Database.Persist.Postgresql
+import System.Log.FastLogger
 
 import Models
+import ZabbixModels
 
 data HabbixState = HabbixState
                  { localPool :: ConnectionPool
@@ -60,10 +64,19 @@ runRemoteDB m = asks remotePool >>= runSqlPool m
 
 -- | @runHabbix debugsql local remote action@
 runHabbix :: Bool -> ConnectionString -> ConnectionString -> Habbix a -> IO a
-runHabbix isloud localConn remoteConn ma =
-    (if isloud then runStderrLoggingT else flip runLoggingT noopLog) $
-    withPostgresqlPool localConn 10 $ \lpool ->
-    withPostgresqlPool remoteConn 10 $ \rpool ->
+runHabbix isloud localConn remoteConn ma = do
+    ls <- newStderrLoggerSet defaultBufSize
+    let myLog _loc src level msg
+            | level == LevelDebug && not isloud = return ()
+            | otherwise                         = pushLogStr ls $
+                "[" <> toLogStr (drop 5 (show level))
+                    <> (if T.null src then mempty else "#" <> toLogStr src)
+                    <>  "] " <> msg <> "\n"
+
+    (`runLoggingT` myLog) $
+        withPostgresqlPool localConn 10 $ \lpool ->
+        withPostgresqlPool remoteConn 10 $ \rpool ->
         runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool isloud)
-        where
-            noopLog _ _ _ _ = return ()
+
+tshow :: Show a => a -> T.Text
+tshow = T.pack . show

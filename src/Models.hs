@@ -18,8 +18,6 @@ import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Database.Persist.TH
 
-import FixedE4
-
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Group sql=groups
     Id                  sql=groupid
@@ -62,27 +60,34 @@ ItemApp sql=items_applications
     item    ItemId          sql=itemid
     deriving Show
 
--- Note: History and HistoryUint have no (primary key) id's in zabbix db,
--- so we don't provide one either. So please, never @get@ these entities!
+-- Notes:
 --
--- Note also that item column in zabbix db doesn't refer the Item table
--- like we do for convenience. It should be disabled after a migrate.
+-- - We combine the `history` (values are numeric(20,4)) and `history_uint`
+--   (values are unsigned ints) tables from zabbix into this History table
+--   (values are always Rational).
+--
+-- - `history` (and history_uint`) have no (primary key) id's in zabbix
+--   db, and there's no reason for us to provide them either. So please,
+--   never @SELECT@ the id column (though the migrate creates it).
+--
+-- - The itemid column in zabbix db doesn't refer the Item table like we
+--   do for convenience.
 History
-    item    ItemId  sql=itemid
-    clock   Int
-    value   FixedE4
-    ns      Int
+    item        ItemId    sql=itemid
+    clock       Int
+    value       Rational  sqltype=numeric(20,4)
     deriving Show
 
-HistoryUint sql=history_uint
-    item    ItemId  sql=itemid
-    clock   Int
-    value   Rational -- numeric(20,0)
-    ns      Int
-    deriving Show
+-- TODO: should this contain an 'interval' column?
+Trend
+    item      ItemId sql=itemid
+    clock     Int
+    valueMin  Rational  sqltype=numeric(20,4)
+    valueAvg  Rational  sqltype=numeric(20,4)
+    valueMax  Rational  sqltype=numeric(20,4)
 
 
--- NOT in Zabbix
+-- Below: NOT in Zabbix
 
 -- Discovering binaries in ./future_models/<name>
 FutureModel
@@ -103,27 +108,20 @@ ItemFuture
 Future
     item        ItemFutureId    sql=itemid
     clock       Int
-    value       FixedE4
-    deriving Show
-
--- wrt history_uint
-FutureUint
-    item        ItemFutureId    sql=itemid
-    clock       Int
-    value       Rational
+    value       Rational        sqltype=numeric(20,4)
     deriving Show
 
 -- like 'y = threshold' lines in graphs
 Threshold
     item        ItemFutureId    sql=itemid
     lower       Bool
-    value       Double
+    value       Rational        sqltype=numeric(20,4)
     deriving Show
 
 -- attach pretty names (cpu, mem) to zabbix items
 Metric
     name        Text
     key_        Text
-    UniqueMetricName name key_
+    UniqueMetricName name
     deriving Show
 |]
