@@ -55,9 +55,13 @@ main = do
             let details = Details { r2det = r2 }
 
             return Result { reClocks  = evDrawFuture
-                          , reValues  = V.map (\x -> a * fromIntegral x + b) evDrawFuture
+                          , reValues  = drawFuture a b evLast evDrawFuture
                           , reDetails = details }
     C.putStrLn (encode res)
+
+drawFuture a b (x0, y0) = V.map (\x -> a * fromIntegral x + b')
+    where b' = y0 - a * fromIntegral x0
+    -- y - y0 = a * (x - x0) ==> y = a * x + (y0 - a * x0) = a * x + b'
 
 -- | apply the filter
 applyFilter :: Filter -> Predict ()

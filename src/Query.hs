@@ -107,6 +107,37 @@ selectHistory' iid vtype muHist muHistUint =
                                             -- only numerator because
                                             -- numeric(20,0)
 
+-- selectMax :: Key Item -> Int -> _
+selectMaxDouble iid vtype = case vtype of
+    0 -> fmap (unwrap realToFrac) . select . from $ \history -> do
+        where_ (history ^. HistoryItem ==. val iid)
+        return $ max_ (history ^. HistoryValue)
+    3 -> fmap (unwrap fromRational) . select . from $ \huint -> do
+        where_ (huint ^. HistoryUintItem ==. val iid)
+        return $ max_ (huint ^. HistoryUintValue)
+    _ -> error $ "valuetype " ++ show vtype ++ " not supported"
+  where
+    unwrap :: (a -> b) -> [Value (Maybe a)] -> b
+    unwrap f [Value (Just n)] = f n
+    unwrap _ _ = error $ "Max value not found for itemid = " ++ show iid
+
+selectLastHistoryTick iid vtype = case vtype of
+    0 -> fmap (unwrap realToFrac) . select . from $ \history -> do
+        where_ (history ^. HistoryItem ==. val iid)
+        orderBy [desc (history ^. HistoryClock)] 
+        limit 1
+        return (history ^. HistoryClock, history ^. HistoryValue)
+    3 -> fmap (unwrap fromRational) . select . from $ \huint -> do
+        where_ (huint ^. HistoryUintItem ==. val iid)
+        orderBy [desc (huint ^. HistoryUintClock)] 
+        limit 1
+        return (huint ^. HistoryUintClock, huint ^. HistoryUintValue)
+    _ -> error $ "valuetype " ++ show vtype ++ " not supported"
+  where
+    unwrap :: (a -> b) -> [(Value Epoch, Value a)] -> (Epoch, b)
+    unwrap f [(Value e, Value n)] = (e, f n)
+    unwrap _ _ = error $ "Last tick not found for itemid = " ++ show iid
+
 -- * Populate
 
 -- | Fetch zabbix data (from remote to local) for all zabbix-tables except

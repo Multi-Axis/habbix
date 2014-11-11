@@ -45,6 +45,7 @@ data Event params = Event
            { evValueType :: Int
            , evClocks :: V.Vector Epoch
            , evValues :: V.Vector Double
+           , evLast :: (Epoch, Double) -- ^ Last value in history
            , evDrawFuture :: V.Vector Epoch
            , evParams :: params
            } deriving (Show)
@@ -164,7 +165,9 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value f
                                             (historyVectors >=> return . second (V.convert . DV.map fromIntegral))
                                      query
 
-            let ev = Event vtype cs hs (futClocks cs) (fromJust $ decodeStrict' params)
+            tick <- runLocalDB $ selectLastHistoryTick itemid vtype
+
+            let ev = Event vtype cs hs tick (futClocks cs) (fromJust $ decodeStrict' params)
 
             res <- runModel model ev
             case res of
