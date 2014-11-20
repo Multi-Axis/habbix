@@ -10,17 +10,22 @@
 -- Maintainer     : Samuli Thomasson <samuli.thomasson@paivola.fi>
 -- Stability      : experimental
 -- Portability    : non-portable
+--
+-- 'Habbix' is the context in which we operate. Provides @IO@ and two
+-- database connections via 'runLocalDB' and `runRemoteDB'.
 ------------------------------------------------------------------------------
 module ZabbixDB
-    ( module ZabbixDB
-    , module Models
-    , module ZabbixModels
-    , ConnectionString
+    ( Habbix, runHabbix, ConnectionString
+
+    -- * DB
+    , DB, runLocalDB, runRemoteDB, module Models, module ZabbixModels
+
+    -- * Utility
+    , Epoch, tshow
     ) where
 
 import Control.Applicative
 import Data.Monoid
-import Data.Int as ZabbixDB
 import qualified Data.Text as T
 
 import Control.Monad.Logger
@@ -37,7 +42,6 @@ import ZabbixModels
 data HabbixState = HabbixState
                  { localPool :: ConnectionPool
                  , remotePool :: ConnectionPool
-                 , logSql :: Bool
                  }
 
 newtype Habbix a = Habbix { unHabbix :: ResourceT (ReaderT HabbixState (LoggingT IO)) a }
@@ -76,7 +80,7 @@ runHabbix isloud localConn remoteConn ma = do
     (`runLoggingT` myLog) $
         withPostgresqlPool localConn 10 $ \lpool ->
         withPostgresqlPool remoteConn 10 $ \rpool ->
-        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool isloud)
+        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool)
 
 tshow :: Show a => a -> T.Text
 tshow = T.pack . show

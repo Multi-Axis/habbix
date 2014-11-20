@@ -8,6 +8,8 @@
 -- Maintainer     : Samuli Thomasson <samuli.thomasson@paivola.fi>
 -- Stability      : experimental
 -- Portability    : non-portable
+--
+-- The Prediction interface: @Event@s out and @Result@s in.
 ------------------------------------------------------------------------------
 module Future
     ( -- * Forecast interface

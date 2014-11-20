@@ -3,8 +3,18 @@
 
 name:                habbix
 version:             0.1.0.0
--- synopsis:            
--- description:         
+synopsis:            Multi-Axis library/executable and misc. zabbix tools
+description:         habbix uses two databases: the vanilla zabbix database
+                     (read-only) and our own (read and write).
+                     .
+                     Module roadmap:
+                     .
+                     - "ZabbixDB" the habbix core ('ZabbixDB.Habbix').
+                     - "ZabbixModels" defines tables only found in the zabbix db.
+                     - "Models" defines all tables (some present in both, some only in our db).
+                     - "Query" provides SQL queries.
+                     - "Future" defines the prediction interface and
+                     - "Forecast" has some regression utilities.
 license:             MIT
 license-file:        LICENSE
 author:              Samuli Thomasson

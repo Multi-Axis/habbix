@@ -11,6 +11,13 @@
 -- Maintainer     : Samuli Thomasson <samuli.thomasson@paivola.fi>
 -- Stability      : experimental
 -- Portability    : non-portable
+--
+-- Models in our db, and possibly in the zabbix db. Also provides
+-- 'migrateAll' that migrates an empty or partial db schema to ours.
+--
+-- __Note that we do not provide any indices, that are crucial for
+-- multi-axis-graphs dashboard performance.__ Refer to that documentation
+-- no how to set them up.
 ------------------------------------------------------------------------------
 module Models where
 

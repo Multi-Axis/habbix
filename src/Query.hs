@@ -7,6 +7,9 @@
 -- Maintainer     : Samuli Thomasson <samuli.thomasson@paivola.fi>
 -- Stability      : experimental
 -- Portability    : non-portable
+--
+-- Queries built with persistent esqueleto against or db (see models in
+-- "Models").
 ------------------------------------------------------------------------------
 module Query
     ( -- * Host and app info

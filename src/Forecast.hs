@@ -7,6 +7,8 @@
 -- Maintainer     : Samuli Thomasson <samuli.thomasson@paivola.fi>
 -- Stability      : experimental
 -- Portability    : non-portable
+--
+-- Regression utilities.
 ------------------------------------------------------------------------------
 module Forecast where
 
@@ -94,12 +96,6 @@ filterDaily = DV.ifoldl' go <$> DV.singleton . (\x -> (0, x)) . DV.head <*> DV.i
             | (_, t) <- DV.last v, t /= toDay c = v
             | otherwise                         = v `DV.snoc` (m, toDay c)
 
-toDay :: Epoch -> Int
-toDay = floor . (/ fromIntegral aday) . fromIntegral
-
-aday :: Int
-aday = 60 * 60 * 24
-
 -- * Utility
 
 vectorAvg :: (Real a, Fractional a) => DV.Vector a -> a
@@ -107,3 +103,9 @@ vectorAvg v = fromRational $ toRational (DV.sum v) / toRational (DV.length v)
 
 vectorMedian :: DV.Vector a -> a
 vectorMedian v = v DV.! floor (fromIntegral (DV.length v) / 2 :: Double)
+
+toDay :: Epoch -> Int
+toDay = floor . (/ fromIntegral aday) . fromIntegral
+
+aday :: Int
+aday = 60 * 60 * 24

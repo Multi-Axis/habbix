@@ -32,6 +32,7 @@ import           Data.Text.Encoding (encodeUtf8)
 import qualified Data.Vector                as DV
 import qualified Data.Vector.Storable       as V
 import qualified Data.Yaml                  as Yaml
+import           Data.Int
 import qualified Database.Esqueleto         as E
 import           Database.Esqueleto              (toSqlKey, Entity(..))
 import qualified Database.Persist           as P
