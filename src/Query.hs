@@ -17,7 +17,7 @@ module Query
 
     -- * History and trends
     DPS, selectHistory, selectHistory', selectHistoryLast,
-    selectHistoryMax,
+    selectHistoryMax, selectZabTrendItem,
     
     -- * Future
     newItemFuture,
@@ -276,6 +276,21 @@ selectZabTrendUint iid lc = select . from $ \trend -> do
     where_ $ trend ^. ZabTrendUintClock >. val lc
          &&. trend ^. ZabTrendUintItem ==. val iid
     return (trend ^. ZabTrendUintClock, trend ^. ZabTrendUintValueMin, trend ^. ZabTrendUintValueAvg, trend ^. ZabTrendUintValueMax)
+
+-- | Select trends data from zabbix
+selectZabTrendsFor :: ItemId -> Int -> Epoch -> DB [Trend]
+selectZabTrendsFor iid vtype lastClock = liftM (map toTrend) $ case vtype of
+    0 -> selectZabTrend iid lastClock
+    3 -> selectZabTrendUint iid lastClock
+  where
+    toTrend (Value time, Value mi, Value av, Value ma) = Trend iid time mi av ma
+
+selectZabTrendItem :: ItemId -> DB (Entity Host, Entity Item, [Trend])
+selectZabTrendItem iid = do
+    Just item <- P.get iid
+    Just host <- P.get (itemHost item)
+    trends <- selectZabTrendsFor iid (itemValueType item) 0
+    return (Entity (itemHost item) host, Entity iid item, trends)
 
 -- * Utility
 
