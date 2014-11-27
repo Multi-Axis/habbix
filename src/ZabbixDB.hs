@@ -67,11 +67,13 @@ runRemoteDB :: SqlPersistT Habbix a -> Habbix a
 runRemoteDB m = asks remotePool >>= runSqlPool m
 
 -- | @runHabbix debugsql local remote action@
-runHabbix :: Bool -> ConnectionString -> ConnectionString -> Habbix a -> IO a
-runHabbix isloud localConn remoteConn ma = do
+runHabbix :: Bool -> Bool -> ConnectionString -> ConnectionString -> Habbix a -> IO a
+runHabbix isquiet isloud localConn remoteConn ma = do
     ls <- newStderrLoggerSet defaultBufSize
     let myLog _loc src level msg
             | level == LevelDebug && not isloud = return ()
+            | level == LevelInfo  && isquiet    = return ()
+            | level == LevelWarn  && isquiet    = return ()
             | otherwise                         = pushLogStr ls $
                 "[" <> toLogStr (drop 5 (show level))
                     <> (if T.null src then mempty else "#" <> toLogStr src)

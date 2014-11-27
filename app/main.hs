@@ -123,6 +123,7 @@ main = do
     prg <- cmdArgs prgConf
     Just Config{..} <- Yaml.decodeFile (config prg)
     debugInfo <- isLoud
+    bequiet <- not <$> isNormal
 
     let argid'  | argid prg < 0  = error "ItemID must be >= 0"
                 | otherwise      = toSqlKey $ argid prg
@@ -136,7 +137,7 @@ main = do
             OutHuman -> outHuman x
             OutSQL   -> outSQL x
 
-    runHabbix debugInfo localDatabase zabbixDatabase $ case prg of
+    runHabbix bequiet debugInfo localDatabase zabbixDatabase $ case prg of
         Hosts{..}   -> out =<< runLocalDB selectHosts
         Apps{..}    -> out =<< runLocalDB (selectHostApplications argid')
         Items{..}   -> out =<< runLocalDB (selectAppItems argid')

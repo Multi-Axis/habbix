@@ -172,6 +172,7 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value f
             tick <- runLocalDB $ selectHistoryLast itemid
             let ev = Event vtype cs hs (fmap (second fromRational) tick)
                         (futClocks cs) (fromJust $ decodeStrict' params)
+            $logDebug (tshow ev)
 
             r <- runModel model ev
             return $ case r of
