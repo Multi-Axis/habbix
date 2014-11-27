@@ -19,9 +19,10 @@ module ZabbixDB
 
     -- * DB
     , DB, runLocalDB, runRemoteDB, module Models, module ZabbixModels
+    , modelsDir
 
     -- * Utility
-    , Epoch, tshow
+    , Epoch, tshow, asks
     ) where
 
 import Control.Applicative
@@ -42,6 +43,7 @@ import ZabbixModels
 data HabbixState = HabbixState
                  { localPool :: ConnectionPool
                  , remotePool :: ConnectionPool
+                 , modelsDir :: FilePath
                  }
 
 newtype Habbix a = Habbix { unHabbix :: ResourceT (ReaderT HabbixState (LoggingT IO)) a }
@@ -67,8 +69,8 @@ runRemoteDB :: SqlPersistT Habbix a -> Habbix a
 runRemoteDB m = asks remotePool >>= runSqlPool m
 
 -- | @runHabbix debugsql local remote action@
-runHabbix :: Bool -> Bool -> ConnectionString -> ConnectionString -> Habbix a -> IO a
-runHabbix isquiet isloud localConn remoteConn ma = do
+runHabbix :: Bool -> Bool -> FilePath -> ConnectionString -> ConnectionString -> Habbix a -> IO a
+runHabbix isquiet isloud modelfp localConn remoteConn ma = do
     ls <- newStderrLoggerSet defaultBufSize
     let myLog _loc src level msg
             | level == LevelDebug && not isloud = return ()
@@ -82,7 +84,7 @@ runHabbix isquiet isloud localConn remoteConn ma = do
     (`runLoggingT` myLog) $
         withPostgresqlPool localConn 10 $ \lpool ->
         withPostgresqlPool remoteConn 10 $ \rpool ->
-        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool)
+        runReaderT (runResourceT $ unHabbix ma) (HabbixState lpool rpool modelfp)
 
 tshow :: Show a => a -> T.Text
 tshow = T.pack . show

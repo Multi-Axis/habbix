@@ -60,9 +60,8 @@ selectHosts = select . from $ \(group `InnerJoin` hostGroup `InnerJoin` host) ->
 -- | All apps for the host (cpu, memory, network, fs, ...).
 selectHostApplications :: HostId -> DB [Entity Application]
 selectHostApplications hid = 
-    P.selectList
-        [ApplicationHost P.==. hid | valid hid]
-        [ P.Asc ApplicationHost, P.Asc ApplicationName ]
+    P.selectList [ ApplicationHost P.==. hid | valid hid ]
+                 [ P.Asc ApplicationHost, P.Asc ApplicationName ]
 
 -- | All items for an application. For example, querying for CPU gives
 -- items for 1 min avg load, 5 min avg load 15 min avg load, idle time, etc.
@@ -267,6 +266,15 @@ selectZabHistUint iid lc = select . from $ \history -> do
          &&. history ^. ZabHistUintItem ==. val iid
     return (history ^. ZabHistUintClock, history ^. ZabHistUintValue)
 
+-- | Select trends data from zabbix
+selectZabTrendsFor :: ItemId -> Int -> Epoch -> DB [Trend]
+selectZabTrendsFor iid vtype lastClock = liftM (map toTrend) $ case vtype of
+    0 -> selectZabTrend iid lastClock
+    3 -> selectZabTrendUint iid lastClock
+    _ -> error $ "Unknown items.value_type (" ++ show vtype ++ ") in selectZabTrendsFor (itemid = " ++ show (fromSqlKey iid) ++ ")"
+  where
+    toTrend (Value time, Value mi, Value av, Value ma) = Trend iid time mi av ma
+
 selectZabTrend, selectZabTrendUint :: ItemId -> Epoch -> DB [(Value Int, Value Rational, Value Rational, Value Rational)]
 selectZabTrend iid lc = select . from $ \trend -> do
     where_ $ trend ^. ZabTrendClock >. val lc
@@ -277,18 +285,10 @@ selectZabTrendUint iid lc = select . from $ \trend -> do
          &&. trend ^. ZabTrendUintItem ==. val iid
     return (trend ^. ZabTrendUintClock, trend ^. ZabTrendUintValueMin, trend ^. ZabTrendUintValueAvg, trend ^. ZabTrendUintValueMax)
 
--- | Select trends data from zabbix
-selectZabTrendsFor :: ItemId -> Int -> Epoch -> DB [Trend]
-selectZabTrendsFor iid vtype lastClock = liftM (map toTrend) $ case vtype of
-    0 -> selectZabTrend iid lastClock
-    3 -> selectZabTrendUint iid lastClock
-  where
-    toTrend (Value time, Value mi, Value av, Value ma) = Trend iid time mi av ma
-
 selectZabTrendItem :: ItemId -> DB (Entity Host, Entity Item, [Trend])
 selectZabTrendItem iid = do
-    Just item <- P.get iid
-    Just host <- P.get (itemHost item)
+    item <- P.getJust iid
+    host <- P.getJust (itemHost item)
     trends <- selectZabTrendsFor iid (itemValueType item) 0
     return (Entity (itemHost item) host, Entity iid item, trends)
 

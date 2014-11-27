@@ -89,6 +89,7 @@ executable habbix
                      , yaml
                      , text
                      , esqueleto
+                     , directory
                      , persistent
                      , transformers
                      , aeson

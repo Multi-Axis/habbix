@@ -131,9 +131,9 @@ getItemFutures mis = runLocalDB . select . from $ \(item `InnerJoin` itemFut `In
 
 getDP :: ItemFutureId -> DefParams -> Habbix DP
 getDP i DefParams{..} = do
-    Just ItemFuture{..} <- runLocalDB $ get i
-    Just Item{..}       <- runLocalDB $ get itemFutureItem
-    nowEpoch            <- liftIO getCurrentEpoch
+    ItemFuture{..} <- runLocalDB $ getJust i
+    Item{..}       <- runLocalDB $ getJust itemFutureItem
+    nowEpoch       <- liftIO getCurrentEpoch
 
     let query = selectHistory' itemFutureItem nowEpoch pStopLower pStopUpper
     runLocalDB $ historyVectors query
@@ -187,7 +187,8 @@ executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value f
 -- given event and return result.
 runModel :: Text -> Event Object -> Habbix (Either String (Result Object))
 runModel name ev = do
-    let filename = "forecast_models/" ++ unpack name
+    dir <- asks modelsDir
+    let filename = dir ++ "/" ++ unpack name
     (ec, stdout, _) <- liftIO $ readProcessWithExitCode filename [filename] (unpack . decodeUtf8 . B.concat . BL.toChunks $ encode ev)
     return $ case ec of
         ExitSuccess -> eitherDecodeStrict' . encodeUtf8 $ pack stdout

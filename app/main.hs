@@ -25,7 +25,6 @@ import           Data.Monoid
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger
 import           Data.Aeson hiding (Result)
 import qualified Data.Aeson.Encode.Pretty   as A
 import qualified Data.ByteString.Lazy.Char8 as BLC
@@ -40,6 +39,7 @@ import qualified Database.Esqueleto         as E
 import           Database.Esqueleto              (toSqlKey, Entity(..))
 import qualified Database.Persist           as P
 import           System.Console.CmdArgs
+import           System.Directory (doesFileExist)
 import           Text.Printf
 
 -- | Inserted by MigrateDb
@@ -52,11 +52,13 @@ defaultMetricNames =
 data Config = Config
             { localDatabase :: ConnectionString
             , zabbixDatabase :: ConnectionString
+            , modeldir :: FilePath
             }
 
 instance FromJSON Config where
     parseJSON (Object o) = Config <$> (encodeUtf8 <$> o .: "localDatabase")
                                   <*> (encodeUtf8 <$> o .: "zabbixDatabase")
+                                  <*> (fromMaybe "forecast_models" <$> o .:? "modeldir")
     parseJSON _          = mzero
 
 data Program = Hosts     { config :: String, outType :: DataOutType }
@@ -137,14 +139,14 @@ main = do
             OutHuman -> outHuman x
             OutSQL   -> outSQL x
 
-    runHabbix bequiet debugInfo localDatabase zabbixDatabase $ case prg of
-        Hosts{..}   -> out =<< runLocalDB selectHosts
-        Apps{..}    -> out =<< runLocalDB (selectHostApplications argid')
-        Items{..}   -> out =<< runLocalDB (selectAppItems argid')
-        Trends{..}  -> out . (,,) asItem' asHost' =<< runRemoteDB (selectZabTrendItem argid')
-        History{..} -> out . sampled samples =<< runLocalDB (historyVectors $ selectHistory argid')
-        Future{..}  -> out =<< runLocalDB (P.selectList [] [P.Asc ItemFutureId])
-        Models{..}  -> out =<< runLocalDB (P.selectList [] [P.Asc FutureModelId])
+    runHabbix bequiet debugInfo modeldir localDatabase zabbixDatabase $ case prg of
+        Hosts{..}     -> out =<< runLocalDB selectHosts
+        Apps{..}      -> out =<< runLocalDB (selectHostApplications argid')
+        Items{..}     -> out =<< runLocalDB (selectAppItems argid')
+        Trends{..}    -> out . (,,) asItem' asHost' =<< runRemoteDB (selectZabTrendItem argid')
+        History{..}   -> out . sampled samples =<< runLocalDB (historyVectors $ selectHistory argid')
+        Future{..}    -> out =<< runLocalDB (P.selectList [] [P.Asc ItemFutureId])
+        Models{..}    -> out =<< runLocalDB (P.selectList [] [P.Asc FutureModelId])
         MigrateDb{..} -> runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
         Sync{..}      -> do
             when syncAll (populateZabbixParts >> populateDefaultFutures)
@@ -152,8 +154,12 @@ main = do
                 [] -> populateAll >> executeFutures' Nothing
                 is -> executeFutures' (Just $ map toSqlKey is)
         Configure{..}
-            | not (null executable) ->
-                -- TODO: check executable exists, too
+            | not (null executable) -> do
+                dir <- asks modelsDir
+                let ex = dir ++ "/" ++ executable
+                e   <- liftIO $ doesFileExist ex
+                unless e (error $ "Executable " ++ ex ++ " not found")
+
                 runLocalDB (P.insert_ $ FutureModel (pack executable))
 
             | item < 0 || model < 0 -> error "Provide either --executable or (ID and --model)"
@@ -186,6 +192,7 @@ class Out t where
 
     -- | Output SQL INSERT'S
     outSQL   :: t -> BLC.ByteString -- TODO
+    outSQL _ = "SQL output not implemented for this case"
 
 instance Out [(Entity Group, Entity Host)] where
     outJSON = toJSON . map p where
@@ -251,6 +258,11 @@ instance Out (ItemId, HostId, (Entity Host, Entity Item, [Trend])) where
                 (E.fromSqlKey iid) trendClock (tof trendValueMin) (tof trendValueAvg) (tof trendValueMax)
             tof :: Rational -> Double
             tof = fromRational
+    outJSON (iid, hid, (Entity _ Host{..}, Entity _ Item{..}, trends)) = object
+        [ "itemid" .= iid
+        , "hostid" .= hid
+        , "trends" .= map (\Trend{..} -> object ["clock" .= trendClock, "value_min" .= trendValueMin, "value_avg" .= trendValueAvg, "value_max" .= trendValueMax]) trends
+        ]
 
 -- * History stuff
 
