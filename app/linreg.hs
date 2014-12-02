@@ -25,27 +25,32 @@ import Data.Aeson.TH
 import qualified Data.Vector.Storable as V
 import qualified Data.ByteString.Lazy.Char8 as C
 import System.Exit
+import System.IO
 
-data Params = Params
-            { preFilter :: Maybe Filter }
+data Params = Params { preFilter :: Maybe Filter }
 
 data Details = Details { r2det :: Double }
 
-$(deriveJSON defaultOptions ''Filter)
-$(deriveJSON defaultOptions ''Params)
-$(deriveJSON defaultOptions ''Details)
+$(deriveJSON aesonOptions ''Filter)
+$(deriveJSON aesonOptions ''FilterAggregate)
+$(deriveJSON aesonOptions ''Params)
+$(deriveJSON aesonOptions ''Details)
 
 main :: IO ()
 main = do
-    Just ev <- decode <$> C.getContents
-    (res, _) <- runStateT (go ev) $ (,) <$> V.convert . evClocks
-                                        <*> V.convert . evValues $ ev
-    C.putStrLn (encode res)
+    inp <- C.getContents
+    case decode inp of
+        Just ev -> do
+            (res, _) <- runStateT (go ev) $ (,) <$> V.convert . evClocks
+                                                <*> V.convert . evValues $ ev
+            C.putStrLn (encode res)
+        Nothing -> hPrint stderr inp
 
 go :: Event Params -> Predict (Result Details)
 go Event{..} = do
     let Params{..} = evParams
-    -- PreFilters
+
+    -- Prefilter
     withMaybe preFilter applyFilter 
 
     -- lin reg

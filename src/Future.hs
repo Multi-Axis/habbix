@@ -189,10 +189,10 @@ runModel :: Text -> Event Object -> Habbix (Either String (Result Object))
 runModel name ev = do
     dir <- asks modelsDir
     let filename = dir ++ "/" ++ unpack name
-    (ec, stdout, _) <- liftIO $ readProcessWithExitCode filename [filename] (unpack . decodeUtf8 . B.concat . BL.toChunks $ encode ev)
+    (ec, stdout, stderr) <- liftIO $ readProcessWithExitCode filename [filename] (unpack . decodeUtf8 . B.concat . BL.toChunks $ encode ev)
     return $ case ec of
         ExitSuccess -> eitherDecodeStrict' . encodeUtf8 $ pack stdout
-        ExitFailure _ -> Left stdout
+        ExitFailure _ -> Left (stdout ++ "\n\n" ++ stderr)
 
 -- | Replaces the future with given result.
 replaceFuture :: Key ItemFuture -> Result Object -> DB ()

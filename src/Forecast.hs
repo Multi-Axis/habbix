@@ -1,4 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RecordWildCards #-}
 ------------------------------------------------------------------------------
 -- | 
 -- Module         : Forecast
@@ -17,10 +19,16 @@ import ZabbixDB (Epoch)
 import Control.Applicative
 import Control.Arrow
 import Control.Monad.State.Strict
+import Data.Char (toLower)
 import Data.Function
+import Data.Aeson.TH
 import           Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as V
 import qualified Data.Vector as DV
+import           Data.Text (pack, unpack)
+import           Database.Persist.Quasi (PersistSettings(psToDBName), lowerCaseSettings)
+
+import Debug.Trace
 
 -- | A simple stateful abstraction
 type Predict = StateT (V.Vector Epoch, V.Vector Double) IO
@@ -68,33 +76,44 @@ drawFuture a b mlast = V.map (\x -> a * fromIntegral x + b')
 
 -- * Filters
 
--- | Note: these are kinda obsolete due to trends
-data Filter = DailyMax | DailyMin | DailyAvg
+data Filter = Filter
+            { aggregate      :: FilterAggregate
+            , interval       :: Epoch -- ^ seconds; a day an hour...
+            , intervalStarts :: Epoch }
 
--- | apply the filter
+data FilterAggregate = Max | Min | Avg
+
 applyFilter :: Filter -> Predict ()
-applyFilter fi = do
+applyFilter Filter{..} = do
     (clocks, values) <- get
 
-    let ixs       = DV.map fst $ filterDaily (V.convert clocks)
-        slices v  = DV.zipWith (\i j -> DV.slice i (j - i) v) ixs (DV.init ixs)
+    let ixs       = traceShowId $ DV.map fst $ splittedAt (intervalStarts `rem` interval) interval (V.convert clocks)
+        slices vs = DV.zipWith (\i j -> DV.slice i (j - i) vs) ixs (DV.tail ixs)
 
-    put . (V.convert *** V.convert) . DV.unzip . DV.map apply . slices
+    put . (V.convert *** V.convert)
+        . DV.unzip . DV.map (apply aggregate) . slices
         $ DV.zip (V.convert clocks) (V.convert values)
 
-  where
-    apply = case fi of
-       DailyMax -> DV.maximumBy (compare `on` snd)
-       DailyMin -> DV.minimumBy (compare `on` snd)
-       DailyAvg -> (vectorMedian *** vectorAvg) . DV.unzip
+apply aggregate = case aggregate of
+   Max -> DV.maximumBy (compare `on` snd)
+   Min -> DV.minimumBy (compare `on` snd)
+   Avg -> (vectorMedian *** vectorAvg) . DV.unzip
 
 -- | Fold left; accumulate the current index (and timestamp) when day changes.
-filterDaily :: DV.Vector Epoch -> DV.Vector (Int, Epoch)
-filterDaily = DV.ifoldl' go <$> DV.singleton . (\x -> (0, x)) . DV.head <*> DV.init
-    where
-        go v m c
-            | (_, t) <- DV.last v, t /= toDay c = v
-            | otherwise                         = v `DV.snoc` (m, toDay c)
+splittedAt :: Epoch -> Epoch -> DV.Vector Epoch -> DV.Vector (Int, Epoch)
+splittedAt start interval =
+    DV.ifoldl' go <$> DV.singleton . ((0,) . toInterval) . DV.head <*> DV.init
+  where
+      go v m c | (_, t) <- DV.last v, t == toInterval c = v
+               | otherwise                              = v `DV.snoc` (m, toInterval c)
+
+      toInterval   = floor . (/ fromIntegral interval) . fromIntegral . (+ start)
+      maybeDrop vs =
+          let l = DV.length vs - 1 in
+          (if snd (vs DV.! 0)       + (interval `div` 2) > snd (vs DV.! 1) then DV.tail else id)
+          . (if snd (vs DV.! (l - 1)) + (interval `div` 2) > snd (vs DV.! l) then DV.init else id)
+          $ vs
+
 
 -- * Utility
 
@@ -104,8 +123,6 @@ vectorAvg v = fromRational $ toRational (DV.sum v) / toRational (DV.length v)
 vectorMedian :: DV.Vector a -> a
 vectorMedian v = v DV.! floor (fromIntegral (DV.length v) / 2 :: Double)
 
-toDay :: Epoch -> Int
-toDay = floor . (/ fromIntegral aday) . fromIntegral
-
-aday :: Int
-aday = 60 * 60 * 24
+aesonOptions = defaultOptions
+    { fieldLabelModifier = unpack . psToDBName lowerCaseSettings . pack
+    , constructorTagModifier = map toLower }
