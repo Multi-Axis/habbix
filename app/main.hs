@@ -45,8 +45,8 @@ import           Text.Printf
 -- | Inserted by MigrateDb
 defaultMetricNames :: [Metric]
 defaultMetricNames =
-    [ Metric "mem" "system.stat[memory,fre]"
-    , Metric "cpu" "system.cpu.load[percpu,avg5]"
+    [ Metric "mem" "system.stat[memory,fre]"      (1024 ^ 3) -- a gB
+    , Metric "cpu" "system.cpu.load[percpu,avg5]" 1          -- %
     ]
 
 data Config = Config
@@ -191,7 +191,7 @@ class Out t where
     outHuman = A.encodePretty . outJSON
 
     -- | Output SQL INSERT'S
-    outSQL   :: t -> BLC.ByteString -- TODO
+    outSQL   :: t -> BLC.ByteString
     outSQL _ = "SQL output not implemented for this case"
 
 instance Out [(Entity Group, Entity Host)] where

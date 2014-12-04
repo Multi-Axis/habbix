@@ -129,6 +129,7 @@ Threshold
 Metric
     name        Text
     key_        Text
+    scale       Int
     UniqueMetricName name
     deriving Show
 |]
