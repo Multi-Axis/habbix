@@ -121,8 +121,9 @@ Future
 -- like 'y = threshold' lines in graphs
 Threshold
     item        ItemFutureId    sql=itemid
-    lower       Bool
-    value       Rational        sqltype=numeric(20,4)
+    normal      Rational        sqltype=numeric(20,4)
+    warning     Double    -- trigger if warning  * normal > value
+    critical    Double    -- trigger if critical * normal > value
     deriving Show
 
 -- attach pretty names (cpu, mem) to zabbix items
