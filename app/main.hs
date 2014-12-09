@@ -178,7 +178,7 @@ main = do
         Execute{..} -> do
             [(a, p, t, f, m)] <- getItemFutures $ Just [toSqlKey argid]
             let p' = if not (null params) then E.Value (encodeUtf8 $ pack params) else p
-            r <- executeModelNextWeek (a, p', t, f, m)
+            r <- executeModel (a, p', t, f, m)
             case r of
                 Right (_, r') -> out r'
                 Left er       -> error er

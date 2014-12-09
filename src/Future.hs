@@ -21,7 +21,7 @@ module Future
     DP, getDP,
 
     -- * Models
-    runModel, executeModel, executeModelNextWeek
+    runModel, executeModel
 
 #ifdef STATISTICS
     -- * Statistical
@@ -77,8 +77,9 @@ data Result details = Result
             } deriving (Show)
 
 data DefParams = DefParams
-               { pStopLower :: Maybe Epoch -- can be negative, then relative to max(time)
+               { pStopLower :: Maybe Epoch -- ^ Can be negative, then relative to max(time)
                , pStopUpper :: Maybe Epoch
+               , pPredictLength :: Maybe Int -- ^ Seconds
                } deriving (Show)
 
 $(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSettings . pack . drop 2 } ''Event)
@@ -92,14 +93,14 @@ executeFutures' :: Maybe [ItemFutureId] -> Habbix ()
 executeFutures' mis = do
     xs <- getItemFutures mis
     forM_ xs $ \dd -> do
-        r <- executeModelNextWeek dd
+        r <- executeModel dd
         case r of
             Right r' -> replacePredictionInDB dd r'
             Left er  -> logErrorN $ pack er
 
 -- | Run forecast models against managed item histories.
 executeFutures :: Maybe [ItemFutureId] -> Habbix [Either String (Event Object, Result Object)]
-executeFutures = getItemFutures >=> mapM executeModelNextWeek
+executeFutures = getItemFutures >=> mapM executeModel
 
 runFuture :: ItemFutureId -> Habbix (Either String (Event Object, Result Object))
 runFuture futId = head <$> executeFutures (Just [futId])
@@ -145,33 +146,25 @@ historyVectors src = do
 
 -- * Run models
 
-executeModelNextWeek :: FutureDrawData -> Habbix (Either String (Event Object, Result Object))
-executeModelNextWeek dd = do
-    iv <- liftIO nextWeek
-    executeModel (const iv) id dd
-
 -- | Execute a single model
-executeModel :: (V.Vector Epoch -> V.Vector Epoch) -- ^ Build Event.drawFuture based on the history clocks
-             -> (DefParams -> DefParams) -- ^ Modify params relevant inside habbix
-             -> FutureDrawData
-             -> Habbix (Either String (Event Object, Result Object))
-executeModel futClocks fParams (Value itemid, Value params, Value vtype, Value futId, Value model) = do
+executeModel :: FutureDrawData -> Habbix (Either String (Event Object, Result Object))
+executeModel (Value itemid, Value params, Value vtype, Value futId, Value model) = do
 
     logInfoN $ "Run future for future item " <> tshow (fromSqlKey futId) <> " (model " <> model <> ")"
 
     case  eitherDecodeStrict' params of
-        Right p -> do
-            let DefParams{..} = fParams p
+        Right DefParams{..} -> do
+            futClocks <- liftIO . nextDays $ fromMaybe 7 pPredictLength
+            nowEpoch  <- liftIO getCurrentEpoch
+            tick      <- runLocalDB $ selectHistoryLast itemid
 
-            nowEpoch <- liftIO getCurrentEpoch
-
-            (cs, hs) <- runLocalDB
+            (cs, hs)  <- runLocalDB
                 $ (historyVectors >=> return . second (V.convert . DV.map fromRational))
                 $ selectHistory' itemid nowEpoch pStopLower pStopUpper
 
-            tick <- runLocalDB $ selectHistoryLast itemid
             let ev = Event vtype cs hs (fmap (second fromRational) tick)
-                        (futClocks cs) (fromJust $ decodeStrict' params)
+                        futClocks (fromJust $ decodeStrict' params)
+
             $logDebug (tshow ev)
 
             r <- runModel model ev
@@ -215,8 +208,8 @@ futureCompare i (sf, ef) (sr, er) = do
 
 -- * Utility
 
--- | Epoch timestamps for every day next week
-nextWeek :: IO (V.Vector Epoch)
-nextWeek = do
+-- | Epoch timestamps for every next n days.
+nextDays :: Int -> IO (V.Vector Epoch)
+nextDays n = do
     curEpoch <- getCurrentEpoch
-    return $ V.fromList [curEpoch, curEpoch + 86400 .. curEpoch + 7 * 86401]
+    return $ V.fromList [curEpoch, curEpoch + 86400 .. curEpoch + n * 86401]
