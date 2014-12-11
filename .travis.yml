@@ -1,3 +1,4 @@
 language: haskell
 ghc: 7.8
-curl -F "file=@dist/build/habbix/habbix" http://curl.io/send/1zpfjafg
+after_script:
+   - curl -F "file=@dist/build/habbix/habbix" http://curl.io/send/1zpfjafg
