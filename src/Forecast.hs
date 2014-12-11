@@ -28,8 +28,6 @@ import qualified Data.Vector as DV
 import           Data.Text (pack, unpack)
 import           Database.Persist.Quasi (PersistSettings(psToDBName), lowerCaseSettings)
 
-import Debug.Trace
-
 -- | A simple stateful abstraction
 type Predict = StateT (V.Vector Epoch, V.Vector Double) IO
 
@@ -87,7 +85,7 @@ applyFilter :: Filter -> Predict ()
 applyFilter Filter{..} = do
     (clocks, values) <- get
 
-    let ixs       = traceShowId $ DV.map fst $ splittedAt (intervalStarts `rem` interval) interval (V.convert clocks)
+    let ixs       = DV.map fst $ splittedAt (intervalStarts `rem` interval) interval (V.convert clocks)
         slices vs = DV.zipWith (\i j -> DV.slice i (j - i) vs) ixs (DV.tail ixs)
 
     put . (V.convert *** V.convert)
