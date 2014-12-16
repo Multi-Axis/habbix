@@ -45,7 +45,7 @@ import           Text.Printf
 -- | Inserted by MigrateDb
 defaultMetricNames :: [Metric]
 defaultMetricNames =
-    [ Metric "mem" "vm.memery.size[available]"    (1024 ^ 3) -- a gB
+    [ Metric "mem" "vm.memory.size[available]"    (1024 ^ 3) -- a gB
     , Metric "cpu" "system.cpu.load[percpu,avg5]" 1          -- %
     , Metric "swap" "system.swap.size[,pfree]"    (1024 ^ 3)
     , Metric "fsroot" "vfs.fs.size[/,pfree]"      (1024 ^ 3)
