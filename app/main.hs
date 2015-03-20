@@ -26,10 +26,11 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Aeson hiding (Result)
+import qualified Data.Map.Strict            as M
 import qualified Data.Aeson.Encode.Pretty   as A
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.Maybe
-import           Data.Text          (pack, unpack)
+import           Data.Text          (Text, pack, unpack)
 import           Data.Text.Encoding (encodeUtf8)
 import qualified Data.Vector                as DV
 import qualified Data.Vector.Storable       as V
@@ -51,16 +52,20 @@ defaultMetricNames =
     , Metric "fsroot" "vfs.fs.size[/,pfree]"      (1024 ^ 3)
     ]
 
+type DashboardConfig = M.Map Text [Text]
+
 data Config = Config
             { localDatabase :: ConnectionString
             , zabbixDatabase :: ConnectionString
             , modeldir :: FilePath
+            , dashboardConfig :: DashboardConfig
             }
 
 instance FromJSON Config where
     parseJSON (Object o) = Config <$> (encodeUtf8 <$> o .: "localDatabase")
                                   <*> (encodeUtf8 <$> o .: "zabbixDatabase")
                                   <*> (fromMaybe "forecast_models" <$> o .:? "modeldir")
+                                  <*> (o .: "dashboard")
     parseJSON _          = mzero
 
 data Program = Hosts     { config :: String, outType :: DataOutType }
@@ -75,6 +80,7 @@ data Program = Hosts     { config :: String, outType :: DataOutType }
              | Configure { config :: String, outType :: DataOutType, item :: Int64, model :: Int64, executable :: String }
              | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String, outCombine :: Bool }
              | Compare   { config :: String, outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
+             | Dashboard { config :: String, outType :: DataOutType, cached :: Bool }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON | OutSQL
@@ -120,6 +126,8 @@ prgConf = modes
                   fromInterval = def &= help "Interval to use with predictions"
                 , toInterval   = def &= help "Interval to compare the predicted model to"
                 } &= help "Compare predictions from knowing A to an actual history B"
+    , Dashboard { cached = True &= help "Use cached version"
+                } &= help "Print dashboard-y information"
     ] &= program "habbix" &= verbosity
 
 main :: IO ()
@@ -150,6 +158,7 @@ main = do
         Future{..}    -> out =<< runLocalDB (P.selectList [] [P.Asc ItemFutureId])
         Models{..}    -> out =<< runLocalDB (P.selectList [] [P.Asc FutureModelId])
         MigrateDb{..} -> runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
+        Dashboard{..} -> liftIO . BLC.putStrLn . encode =<< if cached then getDashboardCached else getDashboard dashboardConfig
         Sync{..}      -> do
             when syncAll (populateZabbixParts >> populateDefaultFutures)
             case itemsToSync of
@@ -182,6 +191,25 @@ main = do
             case r of
                 Right (_, r') -> out r'
                 Left er       -> error er
+
+getDashboard :: DashboardConfig -> Habbix Value
+getDashboard config = runLocalDB $ do
+    hosts <- selectHosts
+    res <- fmap toJSON . forM hosts $ \(_, Entity hostId host) -> do
+        items <- getItems hostId (hostName host)
+        return $ object [ "hostid"   .= hostId
+                        , "hostname" .= hostName host
+                        , "items"    .= items ]
+    liftIO $ BLC.writeFile "dashboard.cached.json" (encode res)
+    return res
+  where
+    getItems i k = let keys = fromMaybe (config M.! "default") $ M.lookup k config
+                       in forM keys (selectItemDashboardData i)
+
+getDashboardCached :: Habbix Value
+getDashboardCached = do
+    res <- liftIO $ BLC.readFile "dashboard.cached.json"
+    return (fromJust $ decode res)
 
 -- * Print
 

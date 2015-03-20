@@ -42,6 +42,7 @@ library
                      , Future
   build-depends:       base                  >=4.5 && <4.8
                      , text                  >=0.11 && <1.2
+                     , containers
                      , bytestring
                      , vector
                      , unordered-containers  >=0.2 && <0.3
@@ -82,6 +83,7 @@ executable habbix
   main-is:             main.hs
   hs-source-dirs:      app
   build-depends:       base
+                     , containers
                      , habbix
                      , cmdargs
                      , conduit

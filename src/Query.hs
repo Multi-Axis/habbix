@@ -14,6 +14,7 @@
 module Query
     ( -- * Host and app info
     selectHosts, selectHostApplications, selectAppItems,
+    selectItemDashboardData,
 
     -- * History and trends
     DPS, selectHistory, selectHistory', selectHistoryLast,
@@ -39,9 +40,14 @@ import           Control.Monad.Logger
 import           Control.Monad.IO.Class
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
+import           Data.Maybe
+import qualified Data.Map.Strict as M
 import           Database.Esqueleto
+import           Database.Esqueleto.Internal.Sql (unsafeSqlValue)
 import qualified Database.Persist as P
 import           Data.Time
+import           Data.Text (Text)
+import qualified Data.Aeson as A
 
 valid :: IsSqlKey a => a -> Bool
 valid = (>= 0) . fromSqlKey
@@ -84,6 +90,63 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
     when (valid aid) $ where_ (itemapp ^. ItemAppApp ==. val aid)
 
     return item
+
+-- | hostid, item name
+selectItemDashboardData :: HostId -> Text -> DB (M.Map Text A.Value)
+selectItemDashboardData h m = do
+    res <- getItemFutureId h m
+    case res of
+        Nothing -> return $ M.fromList ["current_time" A..= (-1 :: Int)]
+        Just (itemfut, item, scale) -> do
+            (n_e, n_v)                <- fromMaybe (0, 0)                                            <$> selectHistoryLast item
+            Entity _ t                <- fromMaybe (Entity undefined $ Threshold itemfut True 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
+            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                      <$> selectAggregatedValues item itemfut
+            return $ M.fromList $
+                [ "metric_name"        A..= m
+                , "metric_scale"       A..= scale
+
+                , "current_time"       A..= n_e
+                , "current_value"      A..= (fromRational n_v :: Double)
+
+                , "past7d"             A..= past7d
+                , "next24h"            A..= next24h
+                , "next6d"             A..= next6d
+
+                , "threshold_high"     A..= thresholdHigh t
+                , "threshold_warning"  A..= thresholdWarning t
+                , "threshold_critical" A..= thresholdCritical t
+                , "threshold_lower"    A..= thresholdLower t
+                ]
+
+-- ItemFutureId by (hostid, metricName)
+getItemFutureId :: HostId -> Text -> DB (Maybe (ItemFutureId, ItemId, Int)) -- ... , metric scale
+getItemFutureId hostid metricName = do
+    res <- select . from $ \(host `InnerJoin` item `InnerJoin` metric `InnerJoin` itemFuture) -> do
+        on (item^.ItemId ==. itemFuture^.ItemFutureItem)
+        on (metric^.MetricKey_ ==. item^.ItemKey_)
+        on (host^.HostId ==. item^.ItemHost)
+        where_ (host^.HostId ==. val hostid &&. metric^.MetricName ==. val metricName)
+        return (itemFuture^.ItemFutureId, item^.ItemId, metric^.MetricScale)
+    return $ case res of
+                 [(Value itf, Value i, Value m)] -> Just (itf, i, m)
+                 _ -> Nothing
+
+-- (past 7d, next24h, next7d)
+selectAggregatedValues :: ItemId -> ItemFutureId -> DB (Maybe (Double, Double, Double))
+selectAggregatedValues item itemfuture = do
+    res <- select $ from $ \(h, f1, f2) -> do
+        where_ $ h ^.TrendItem  ==. val item       &&.
+                 f1^.FutureItem ==. val itemfuture &&.
+                 f2^.FutureItem ==. val itemfuture &&.
+                 h ^.TrendClock  >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) - 7*86400" &&.
+                 f1^.FutureClock >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)" &&.
+                 f1^.FutureClock <. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) + 86400" &&.
+                 f2^.FutureClock >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)" &&.
+                 f2^.FutureClock <. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) + 7*86400"
+        return (max_ (h^.TrendValueMax), max_ (f1^.FutureValue), max_ (f2^.FutureValue))
+    return $ case res of
+        [(Value (Just a), Value (Just b), Value (Just c))] -> Just (fromRational a, fromRational b, fromRational c)
+        _ -> Nothing
 
 -- * History data points
 
