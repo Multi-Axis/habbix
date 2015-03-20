@@ -9,3 +9,16 @@ zabbixDatabase: "host=localhost port=5432 user=zabbix dbname=zabbix"
 
 # Connect to local database (read and write)
 localDatabase: "host=localhost port=5432 user=multi-axis dbname=multi-axis"
+
+# dASHBOArd host-specific configuration
+dashboard:
+
+   # Define the default metrics for unspecified hosts
+   default:
+      - cpu
+      - mem
+      - swap
+      - fsdata
+
+   # Hide the host my-host.mydomain.com completely in the dashboard
+   "my-host.mydomain.com": []
