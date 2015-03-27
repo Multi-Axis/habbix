@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 ------------------------------------------------------------------------------
 -- | 
 -- Module         : Query
@@ -49,7 +50,7 @@ import           Data.Time
 import           Data.Text (Text)
 import qualified Data.Aeson as A
 
-valid :: IsSqlKey a => a -> Bool
+-- valid :: IsSqlKey a => a -> Bool -- different type class than IsSqlKey in newer versions of persistent
 valid = (>= 0) . fromSqlKey
 
 -- * General queries
