@@ -127,9 +127,10 @@ getItemFutureId hostid metricName = do
         on (metric^.MetricKey_ ==. item^.ItemKey_)
         on (host^.HostId ==. item^.ItemHost)
         where_ (host^.HostId ==. val hostid &&. metric^.MetricName ==. val metricName)
+        orderBy [desc $ itemFuture^.ItemFutureIsMaster]
         return (itemFuture^.ItemFutureId, item^.ItemId, metric^.MetricScale)
     return $ case res of
-                 [(Value itf, Value i, Value m)] -> Just (itf, i, m)
+                 (Value itf, Value i, Value m) : _ -> Just (itf, i, m)
                  _ -> Nothing
 
 -- (past 7d, next24h, next7d)
