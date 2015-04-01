@@ -19,6 +19,7 @@ dashboard:
       - mem
       - swap
       - fsdata
+      - fsroot
 
    # Hide the host my-host.mydomain.com completely in the dashboard
    "my-host.mydomain.com": []

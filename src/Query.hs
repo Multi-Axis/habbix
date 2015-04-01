@@ -284,7 +284,7 @@ populateHistoryFor iid vtype = do
         Nothing -> do
             logInfoN ("Item (itemid = " <> tshow iid <> ") has no history yet. Populating it from scratch. This may take a while")
             return 0
-    twoWeeks <- liftIO twoWeeksAgo
+    twoWeeks <- liftIO (daysAgo 14)
 
     let toHistory (Value c, Value v) = History iid c v
 
@@ -359,8 +359,8 @@ selectZabTrendItem iid = do
 
 -- * Utility
 
-twoWeeksAgo :: IO Epoch
-twoWeeksAgo = (\x -> x - 14 * 86400) <$> getCurrentEpoch
+daysAgo :: Int -> IO Epoch
+daysAgo n = (\x -> x - n * 86400) <$> getCurrentEpoch
 
 getCurrentEpoch :: IO Epoch
 getCurrentEpoch = read . formatTime undefined "%s" <$> getCurrentTime

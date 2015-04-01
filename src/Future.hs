@@ -154,7 +154,7 @@ executeModel (Value itemid, Value params, Value vtype, Value futId, Value model)
 
     case  eitherDecodeStrict' params of
         Right DefParams{..} -> do
-            futClocks <- liftIO . nextDays $ fromMaybe 7 pPredictLength
+            futClocks <- liftIO . nextDays $ fromMaybe 45 pPredictLength
             nowEpoch  <- liftIO getCurrentEpoch
             tick      <- runLocalDB $ selectHistoryLast itemid
 
