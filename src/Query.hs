@@ -120,7 +120,7 @@ selectItemDashboardData h m = do
                 ]
 
 -- ItemFutureId by (hostid, metricName)
-getItemFutureId :: HostId -> Text -> DB (Maybe (ItemFutureId, ItemId, Int)) -- ... , metric scale
+getItemFutureId :: HostId -> Text -> DB (Maybe (ItemFutureId, ItemId, Double)) -- (, , metric scale)
 getItemFutureId hostid metricName = do
     res <- select . from $ \(host `InnerJoin` item `InnerJoin` metric `InnerJoin` itemFuture) -> do
         on (item^.ItemId ==. itemFuture^.ItemFutureItem)

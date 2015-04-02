@@ -131,7 +131,7 @@ Threshold
 Metric
     name        Text
     key_        Text
-    scale       Int
+    scale       Double
     UniqueMetricName name
     deriving Show
 |]
