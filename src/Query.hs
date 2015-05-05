@@ -1,4 +1,6 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 ------------------------------------------------------------------------------
 -- | 
@@ -57,12 +59,14 @@ valid = (>= 0) . fromSqlKey
 
 -- | Select all hosts along with their groups that do /not/ belong to the
 -- Templates (groupid == 1).
-selectHosts :: DB [(Entity Group, Entity Host)]
-selectHosts = select . from $ \(group `InnerJoin` hostGroup `InnerJoin` host) -> do
-    on (hostGroup ^. HostGroupHost ==. host ^. HostId)
-    on (group ^. GroupId ==. hostGroup ^. HostGroupGroup)
-    where_ (group ^. GroupId !=. val (toSqlKey 1))
-    return (group, host)
+selectHosts :: DB [Entity Host]
+selectHosts = select . from $ \host -> do
+    where_ (host ^. HostId `in_` notTemplateHosts)
+    return host
+  where
+    notTemplateHosts = subList_select . from $ \hg -> do
+        where_ (hg ^. HostGroupGroup !=. val (toSqlKey 1))
+        return (hg ^. HostGroupHost)
 
 -- | All apps for the host (cpu, memory, network, fs, ...).
 selectHostApplications :: HostId -> DB [Entity Application]
@@ -229,15 +233,18 @@ newItemFuture i m = runLocalDB . P.insert . ItemFuture i m "{}" "{}"
 -- history and trends
 populateZabbixParts :: Habbix ()
 populateZabbixParts = do
-    selectRepsert ([] :: [P.Filter Group]) []
-    selectRepsert ([] :: [P.Filter Host]) []
-    selectRepsert ([] :: [P.Filter HostGroup]) []
-    selectRepsert ([] :: [P.Filter Application]) []
-    selectRepsert ([] :: [P.Filter Item]) []
-    selectRepsert ([] :: [P.Filter ItemApp]) []
+    $logInfo "Starting data data from zabbix"
+    selectRepsert "Groups" ([] :: [P.Filter Group]) []
+    selectRepsert "Hosts" ([] :: [P.Filter Host]) []
+    selectRepsert "HostGroups" ([] :: [P.Filter HostGroup]) []
+    selectRepsert "Applications" ([] :: [P.Filter Application]) []
+    selectRepsert "Items" ([] :: [P.Filter Item]) []
+    selectRepsert "ItemApps" ([] :: [P.Filter ItemApp]) []
+    $logInfo "Data copy from zabbix complete"
     where
-        selectRepsert xs ys          = runRemoteDB (P.selectSource xs ys $$ CL.consume)
-                                        >>= runLocalDB . mapM_ repsertEntity
+        selectRepsert desc xs ys = do
+            $logInfo $ "Copying " <> desc <> "..."
+            runRemoteDB (P.selectSource xs ys $$ CL.consume) >>= runLocalDB . mapM_ repsertEntity
         repsertEntity (Entity key v) = P.repsert key v
 
 -- | Adds default item_futures to those items that do not have any.

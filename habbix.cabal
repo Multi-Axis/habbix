@@ -40,7 +40,7 @@ library
                      , ZabbixModels
                      , Forecast
                      , Future
-  build-depends:       base                  >=4.5 && <4.8
+  build-depends:       base                  >=4.5 && <4.9
                      , text                  >=0.11 && <1.3
                      , containers
                      , bytestring

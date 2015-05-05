@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -198,7 +199,7 @@ getDashboard :: DashboardConfig -> Habbix Value
 getDashboard config = runLocalDB $ do
     hosts <- selectHosts
 
-    hostsJson <- fmap toJSON . forM hosts $ \(_, Entity hostId host) -> do
+    hostsJson <- fmap toJSON . forM hosts $ \(Entity hostId host) -> do
         items <- getItems hostId (hostName host)
         return $ object [ "hostid"   .= hostId
                         , "hostname" .= hostName host
@@ -232,13 +233,11 @@ class Out t where
     outSQL   :: t -> BLC.ByteString
     outSQL _ = "SQL output not implemented for this case"
 
-instance Out [(Entity Group, Entity Host)] where
+instance Out [Entity Host] where
     outJSON = toJSON . map p where
-        p (Entity _ gp, Entity hid host) = object
+        p (Entity hid host) = object
             [ "hostid" .= hid
-            , "group"  .= groupName gp
-            , "host"   .= hostName host
-            ]
+            , "host"   .= hostName host ]
 
 instance Out [Entity Item] where
     outJSON = toJSON . map p where

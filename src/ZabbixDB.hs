@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -52,9 +53,18 @@ newtype Habbix a = Habbix { unHabbix :: ResourceT (ReaderT HabbixState (LoggingT
 -- This is just a mechanical MonadBaseControl instance, albeit rather
 -- tricky to grasp. Without the associated type ghc would derive this too :)
 instance MonadBaseControl IO Habbix where
+#if MIN_VERSION_monad_control(1,0,0)
+    type StM Habbix a = NewStM a
+    liftBaseWith f = Habbix (liftBaseWith (\run -> f (liftM StMHabbix . run . unHabbix)))
+    restoreM = Habbix . restoreM . unStMHabbix
+
+newtype NewStM a = StMHabbix { unStMHabbix :: StM (ResourceT (ReaderT HabbixState (LoggingT IO))) a }
+
+#else
     newtype StM Habbix a = StMHabbix { unStMHabbix :: StM (ResourceT (ReaderT HabbixState (LoggingT IO))) a }
     liftBaseWith f = Habbix (liftBaseWith (\run -> f (liftM StMHabbix . run . unHabbix)))
     restoreM = Habbix . restoreM . unStMHabbix
+#endif
 
 type DB = SqlPersistT Habbix
 
