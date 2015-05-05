@@ -92,16 +92,16 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 
     return item
 
--- | hostid, item name
+-- | Get, by (hostid, items.name), values for the item to use in the dashboard.
 selectItemDashboardData :: HostId -> Text -> DB (M.Map Text A.Value)
 selectItemDashboardData h m = do
     res <- getItemFutureId h m
     case res of
         Nothing -> return $ M.fromList ["current_time" A..= (-1 :: Int)]
         Just (itemfut, item, scale) -> do
-            (n_e, n_v)                <- fromMaybe (0, 0)                                            <$> selectHistoryLast item
-            Entity _ t                <- fromMaybe (Entity undefined $ Threshold itemfut True 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
-            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                      <$> selectAggregatedValues item itemfut
+            (n_e, n_v)                <- fromMaybe (0, 0)                                             <$> selectHistoryLast item
+            Entity _ t                <- fromMaybe (Entity undefined $ Threshold itemfut False 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
+            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                       <$> selectAggregatedValues item itemfut
             return $ M.fromList $
                 [ "metric_name"        A..= m
                 , "metric_scale"       A..= scale
@@ -119,7 +119,7 @@ selectItemDashboardData h m = do
                 , "threshold_lower"    A..= thresholdLower t
                 ]
 
--- ItemFutureId by (hostid, metricName)
+-- (ItemFutureId, ItemId, MetricScale) by (HostId, MetricName)
 getItemFutureId :: HostId -> Text -> DB (Maybe (ItemFutureId, ItemId, Double)) -- (, , metric scale)
 getItemFutureId hostid metricName = do
     res <- select . from $ \(host `InnerJoin` item `InnerJoin` metric `InnerJoin` itemFuture) -> do
@@ -366,7 +366,7 @@ getCurrentEpoch :: IO Epoch
 getCurrentEpoch = read . formatTime undefined "%s" <$> getCurrentTime
 
 unwrapFirst :: [(Value a, Value b)] -> Maybe (a, b)
-unwrapFirst [(Value e, Value n)] = Just (e, n)
+unwrapFirst ((Value e, Value n) : _) = Just (e, n)
 unwrapFirst _ = Nothing
 
 withMaybe :: Monad m => Maybe a -> (a -> m ()) -> m ()
