@@ -247,10 +247,13 @@ populateZabbixParts = do
             runRemoteDB (P.selectSource xs ys $$ CL.consume) >>= runLocalDB . mapM_ repsertEntity
 
         repsertEntity (Entity key v) = do
-            res <- P.getByValue v
-            case res of -- if itemid has changed. remove everything and insert again
-                Just (Entity key_indb _) | key_indb /= key -> P.deleteCascade key_indb
-                _ -> return ()
+
+            -- if itemid has changed. remove everything and insert again
+            when (not $ null $ persistUniqueKeys v) $ do
+                res <- P.getByValue v
+                case res of
+                    Just (Entity key_indb _) | key_indb /= key -> P.deleteCascade key_indb
+                    _ -> return ()
 
             P.repsert key v
 
