@@ -26,6 +26,7 @@ import           Data.Monoid
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Logger
 import           Data.Aeson hiding (Result)
 import qualified Data.Map.Strict            as M
 import qualified Data.Aeson.Encode.Pretty   as A
@@ -166,7 +167,8 @@ main = do
             case itemsToSync of
                 [] -> populateAll >> executeFutures' Nothing
                 is -> executeFutures' (Just $ map toSqlKey is)
-            void $ getDashboard dashboardConfig -- update dashboard
+            logInfoN "Now rebuilding the dashboard"
+            void $ getDashboard dashboardConfig
         Configure{..}
             | not (null executable) -> do
                 dir <- asks modelsDir

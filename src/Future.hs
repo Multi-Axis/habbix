@@ -92,11 +92,10 @@ $(deriveJSON defaultOptions{fieldLabelModifier = unpack . psToDBName lowerCaseSe
 executeFutures' :: Maybe [ItemFutureId] -> Habbix ()
 executeFutures' mis = do
     xs <- getItemFutures mis
-    forM_ xs $ \dd -> do
-        r <- executeModel dd
-        case r of
-            Right r' -> replacePredictionInDB dd r'
-            Left er  -> logErrorN $ pack er
+
+    $logInfo $ "Updating forecasts for " <> tshow (length xs) <> " items."
+
+    forM_ xs $ \dd -> executeModel dd >>= either (logErrorN . pack) (replacePredictionInDB dd)
 
 -- | Run forecast models against managed item histories.
 executeFutures :: Maybe [ItemFutureId] -> Habbix [Either String (Event Object, Result Object)]
@@ -150,7 +149,7 @@ historyVectors src = do
 executeModel :: FutureDrawData -> Habbix (Either String (Event Object, Result Object))
 executeModel (Value itemid, Value params, Value vtype, Value futId, Value model) = do
 
-    logInfoN $ "Run future for future item " <> tshow (fromSqlKey futId) <> " (model " <> model <> ")"
+    $logDebug $ "Run future for future item " <> tshow (fromSqlKey futId) <> " (model " <> model <> ")"
 
     case  eitherDecodeStrict' params of
         Right DefParams{..} -> do

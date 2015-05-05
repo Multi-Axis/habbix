@@ -289,7 +289,7 @@ populateHistoryFor iid vtype = do
     lastClock <- runLocalDB (selectHistoryLast iid) >>= \x -> case x of
         Just (n, _) -> return n
         Nothing -> do
-            logInfoN ("Item (itemid = " <> tshow iid <> ") has no history yet. Populating it from scratch. This may take a while")
+            logInfoN ("Item (itemid = " <> tshow (fromSqlKey iid) <> ") has no history yet. Populating it from scratch. This may take a while")
             return 0
     twoWeeks <- liftIO (daysAgo 14)
 
@@ -312,13 +312,13 @@ populateTrendsFor iid vtype = do
     lastClock <- runLocalDB (selectTrendLast iid) >>= \x -> case x of
         Just (n, _) -> return n
         Nothing -> do
-            logInfoN ("Item (itemid = " <> tshow iid <> ") has no trend history yet. Populating it from scratch. This may take a while")
+            logInfoN ("Item (itemid = " <> tshow (fromSqlKey iid) <> ") has no trend history yet. Populating it from scratch. This may take a while")
             return 0
     vals <- runRemoteDB $ case vtype of
         0 -> selectZabTrend iid lastClock
         3 -> selectZabTrendUint iid lastClock
         _ -> do
-            logErrorN $ "Item (itemid = " <> tshow iid <> ") has unknown value_type (" <> tshow vtype <> ")"
+            logErrorN $ "Item (itemid = " <> tshow (fromSqlKey iid) <> ") has unknown value_type (" <> tshow vtype <> ")"
             return []
     let toTrend (Value clock, Value a, Value b, Value c) = Trend iid clock a b c
     insertMany_' $ map toTrend vals
