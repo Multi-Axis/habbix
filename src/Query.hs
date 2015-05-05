@@ -245,7 +245,14 @@ populateZabbixParts = do
         selectRepsert desc xs ys = do
             $logInfo $ "Copying " <> desc <> "..."
             runRemoteDB (P.selectSource xs ys $$ CL.consume) >>= runLocalDB . mapM_ repsertEntity
-        repsertEntity (Entity key v) = P.repsert key v
+
+        repsertEntity (Entity key v) = do
+            res <- P.getByValue v
+            case res of -- if itemid has changed. remove everything and insert again
+                Just (Entity key_indb _) | key_indb /= key -> P.deleteCascade key_indb
+                _ -> return ()
+
+            P.repsert key v
 
 -- | Adds default item_futures to those items that do not have any.
 --
