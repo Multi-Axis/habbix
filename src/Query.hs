@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 ------------------------------------------------------------------------------
--- | 
+-- |
 -- Module         : Query
 -- Copyright      : (C) 2014 Samuli Thomasson
 -- License        : MIT (see the file LICENSE)
@@ -23,9 +23,9 @@ module Query
     -- * History and trends
     DPS, selectHistory, selectHistory', selectHistoryLast,
     selectHistoryMax, selectZabTrendItem,
-    
+
     -- * Future
-    newItemFuture, selectThresholds,
+    newItemFuture, selectThresholds, updateThresholds,
 
     -- * Populate from remote
     populateZabbixParts, populateDefaultFutures, populateAll,
@@ -76,7 +76,7 @@ selectHosts = select . from $ \host -> do
 
 -- | All apps for the host (cpu, memory, network, fs, ...).
 selectHostApplications :: HostId -> DB [Entity Application]
-selectHostApplications hid = 
+selectHostApplications hid =
     P.selectList [ ApplicationHost P.==. hid | valid hid ]
                  [ P.Asc ApplicationHost, P.Asc ApplicationName ]
 
@@ -145,6 +145,8 @@ getItemFutureId hostid metricName = do
                  (Value itf, Value i, Value m) : _ -> Just (itf, i, m)
                  _ -> Nothing
 
+-- | Get the threshold for the given itemfuture. If not present, set it to
+-- (0,0,0) and return that.
 selectOrSetDefaultThreshold :: ItemFutureId -> DB Threshold
 selectOrSetDefaultThreshold itemfut = do
     res <- P.selectFirst [ThresholdItem P.==. itemfut] []
@@ -173,12 +175,32 @@ selectAggregatedValues aggFun item itemfuture = do
         [(Value (Just a), Value (Just b), Value (Just c))] -> Just (fromRational a, fromRational b, fromRational c)
         _ -> Nothing
 
-selectThresholds :: DB [(Entity Metric, Entity Threshold)]
-selectThresholds = select $ from $ \(threshold `InnerJoin` itemFuture `InnerJoin` item `InnerJoin` metric) -> do
+-- | select thresholds with given metric name
+selectThresholds :: Maybe Text -> DB [(Entity Metric, Entity Threshold)]
+selectThresholds = select . thresholdsInMetric (\m t -> return (m,t))
+
+-- |
+thresholdsInMetric f mmetric = from $ \(threshold `InnerJoin` itemFuture `InnerJoin` item `InnerJoin` metric) -> do
     on (metric^.MetricKey_ ==. item^.ItemKey_)
     on (item^.ItemId ==. itemFuture^.ItemFutureItem)
     on (itemFuture^.ItemFutureId ==. threshold^.ThresholdItem)
-    return (metric, threshold)
+    withMaybe mmetric $ \name -> where_ (metric^.MetricName ==. val name)
+    f metric threshold
+
+-- | @updateThresholds metricName lower warning high critical@
+updateThresholds :: Text -> Maybe Bool -> Maybe Double -> Maybe Double -> Maybe Double -> DB ()
+updateThresholds name mlower warning high critical = do
+
+    -- get id's of thresholds to update
+    let thresholdIds = subList_selectDistinct $ thresholdsInMetric (\_ t -> return (t^.ThresholdId)) (Just name)
+
+    update $ \threshold -> do
+        set threshold $ catMaybes $
+            [ (ThresholdLower =.) .val   <$> mlower
+            , (ThresholdWarning =.) .val <$> warning
+            , (ThresholdHigh =.) .val    <$> high
+            , (ThresholdCritical =.).val <$> critical ]
+        where_ (threshold ^. ThresholdId `in_` thresholdIds)
 
 -- * History data points
 
@@ -234,14 +256,14 @@ selectHistoryMax iid = fmap unwrap . select . from $ \history -> do
 selectHistoryLast :: ItemId -> DB (Maybe (Epoch, Rational))
 selectHistoryLast iid = fmap unwrapFirst . select . from $ \history -> do
     where_ (history ^. HistoryItem ==. val iid)
-    orderBy [desc (history ^. HistoryClock)] 
+    orderBy [desc (history ^. HistoryClock)]
     limit 1
     return (history ^. HistoryClock, history ^. HistoryValue)
 
 selectTrendLast :: ItemId -> DB (Maybe (Epoch, Rational))
 selectTrendLast iid = fmap unwrapFirst . select . from $ \trend -> do
     where_ (trend ^. TrendItem ==. val iid)
-    orderBy [desc (trend ^. TrendClock)] 
+    orderBy [desc (trend ^. TrendClock)]
     limit 1
     return (trend ^. TrendClock, trend ^. TrendValueAvg)
 

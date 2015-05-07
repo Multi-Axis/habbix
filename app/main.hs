@@ -84,7 +84,7 @@ data Program = Hosts     { config :: String, outType :: DataOutType }
              | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String, outCombine :: Bool }
              | Compare   { config :: String, outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
              | Dashboard { config :: String, outType :: DataOutType, cached :: Bool }
-             | Th        { config :: String, outType :: DataOutType }
+             | Th        { config :: String, outType :: DataOutType, update :: Bool, metric :: Maybe String, critical :: Double, warning :: Double, high :: Double, lower :: Bool }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON | OutSQL
@@ -133,7 +133,13 @@ prgConf = modes
     , Dashboard { cached = True &= help "Use cached version"
                 } &= help "Print dashboard-y information"
 
-    , Th        { } &= help "Print or set threshold values"
+    , Th        { update   = False &= help "Make changes in the database"
+                , metric   = Nothing &= help "Which metric to operate on"
+                , lower    = False &= help "Are the threshold lower bounds (default: upper)"
+                , critical = def &= help "critical threshold"
+                , warning  = def &= help "warning threshold"
+                , high     = def &= help "high threshold"
+                } &= help "Print or set threshold values"
     ] &= program "habbix" &= verbosity
 
 main :: IO ()
@@ -166,7 +172,9 @@ main = do
         MigrateDb{..} -> runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
         Dashboard{..} -> liftIO . BLC.putStrLn . encode =<< if cached then getDashboardCached else getDashboard dashboardConfig
 
-        Th{..} -> out =<< runLocalDB selectThresholds
+        Th{..}        -> do
+            liftIO $ print critical
+            out =<< runLocalDB (selectThresholds $ fmap pack metric)
 
         Sync{..}      -> do
             when syncAll (populateZabbixParts >> populateDefaultFutures)
