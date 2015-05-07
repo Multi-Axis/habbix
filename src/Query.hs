@@ -111,9 +111,9 @@ selectItemDashboardData h m = do
     case res of
         Nothing -> return $ M.fromList ["current_time" A..= (-1 :: Int)]
         Just (itemfut, item, scale) -> do
-            (n_e, n_v)                <- fromMaybe (0, 0)                                             <$> selectHistoryLast item
-            Entity _ threshold        <- fromMaybe (Entity undefined $ Threshold itemfut False 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
-            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                       <$> selectAggregatedValues avg_ item itemfut
+            (n_e, n_v)                <- fromMaybe (0, 0) <$> selectHistoryLast item
+            threshold                 <- selectOrSetDefaultThreshold itemfut
+            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1) <$> selectAggregatedValues avg_ item itemfut
             return $ M.fromList $
                 [ "metric_name"        A..= m
                 , "metric_scale"       A..= scale
@@ -144,6 +144,15 @@ getItemFutureId hostid metricName = do
     return $ case res of
                  (Value itf, Value i, Value m) : _ -> Just (itf, i, m)
                  _ -> Nothing
+
+selectOrSetDefaultThreshold :: ItemFutureId -> DB Threshold
+selectOrSetDefaultThreshold itemfut = do
+    res <- P.selectFirst [ThresholdItem P.==. itemfut] []
+    case res of
+        Just (Entity _ threshold) -> return threshold
+        Nothing -> P.insert defaultThreshold >> return defaultThreshold
+  where
+    defaultThreshold = Threshold itemfut False 0 0 0
 
 -- | Values of (past 7d, next24h, next7d).
 --
