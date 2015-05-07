@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
@@ -52,6 +53,11 @@ import           Data.Time
 import           Data.Text (Text)
 import qualified Data.Aeson as A
 
+-- | avg_, max_, min_ etc
+type AggregateFunction = (Esqueleto query expr backend, PersistField a) => expr (Value a) -> expr (Value (Maybe a))
+
+currentTimestampSql = unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)"
+
 -- valid :: IsSqlKey a => a -> Bool -- different type class than IsSqlKey in newer versions of persistent
 valid = (>= 0) . fromSqlKey
 
@@ -96,7 +102,9 @@ selectAppItems aid = select . from $ \(itemapp `InnerJoin` item) -> do
 
     return item
 
--- | Get, by (hostid, items.name), values for the item to use in the dashboard.
+-- | ItemFuture data
+--
+-- Get by (hostid, items.name) values for the item to use in the dashboard.
 selectItemDashboardData :: HostId -> Text -> DB (M.Map Text A.Value)
 selectItemDashboardData h m = do
     res <- getItemFutureId h m
@@ -104,8 +112,8 @@ selectItemDashboardData h m = do
         Nothing -> return $ M.fromList ["current_time" A..= (-1 :: Int)]
         Just (itemfut, item, scale) -> do
             (n_e, n_v)                <- fromMaybe (0, 0)                                             <$> selectHistoryLast item
-            Entity _ t                <- fromMaybe (Entity undefined $ Threshold itemfut False 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
-            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                       <$> selectAggregatedValues item itemfut
+            Entity _ threshold        <- fromMaybe (Entity undefined $ Threshold itemfut False 0 0 0) <$> P.selectFirst [ThresholdItem P.==. itemfut] []
+            (past7d, next24h, next6d) <- fromMaybe (-1, -1, -1)                                       <$> selectAggregatedValues avg_ item itemfut
             return $ M.fromList $
                 [ "metric_name"        A..= m
                 , "metric_scale"       A..= scale
@@ -117,10 +125,10 @@ selectItemDashboardData h m = do
                 , "next24h"            A..= next24h
                 , "next6d"             A..= next6d
 
-                , "threshold_high"     A..= thresholdHigh t
-                , "threshold_warning"  A..= thresholdWarning t
-                , "threshold_critical" A..= thresholdCritical t
-                , "threshold_lower"    A..= thresholdLower t
+                , "threshold_high"     A..= thresholdHigh threshold
+                , "threshold_warning"  A..= thresholdWarning threshold
+                , "threshold_critical" A..= thresholdCritical threshold
+                , "threshold_lower"    A..= thresholdLower threshold
                 ]
 
 -- (ItemFutureId, ItemId, MetricScale) by (HostId, MetricName)
@@ -137,19 +145,21 @@ getItemFutureId hostid metricName = do
                  (Value itf, Value i, Value m) : _ -> Just (itf, i, m)
                  _ -> Nothing
 
--- (past 7d, next24h, next7d)
-selectAggregatedValues :: ItemId -> ItemFutureId -> DB (Maybe (Double, Double, Double))
-selectAggregatedValues item itemfuture = do
-    res <- select $ from $ \(h, f1, f2) -> do
-        where_ $ h ^.TrendItem  ==. val item       &&.
-                 f1^.FutureItem ==. val itemfuture &&.
-                 f2^.FutureItem ==. val itemfuture &&.
-                 h ^.TrendClock  >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) - 7*86400" &&.
-                 f1^.FutureClock >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)" &&.
-                 f1^.FutureClock <. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) + 86400" &&.
-                 f2^.FutureClock >. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)" &&.
-                 f2^.FutureClock <. unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp) + 7*86400"
-        return (max_ (h^.TrendValueMax), max_ (f1^.FutureValue), max_ (f2^.FutureValue))
+-- | Values of (past 7d, next24h, next7d).
+--
+--
+selectAggregatedValues :: AggregateFunction -> ItemId -> ItemFutureId -> DB (Maybe (Double, Double, Double))
+selectAggregatedValues aggFun item itemfuture = do
+    res <- select $ from $ \(trend, f1, f2) -> do
+        where_ $ trend^.TrendItem ==. val item
+               &&. f1^.FutureItem ==. val itemfuture
+               &&. f2^.FutureItem ==. val itemfuture
+               &&. trend^.TrendClock >. currentTimestampSql -. val (7 * 86400)
+               &&. f1^.FutureClock >. currentTimestampSql
+               &&. f1^.FutureClock <. currentTimestampSql +. val 86400
+               &&. f2^.FutureClock >. currentTimestampSql
+               &&. f2^.FutureClock <. currentTimestampSql +. val (7 * 86400)
+        return (aggFun (trend^.TrendValueMax), aggFun (f1^.FutureValue), aggFun (f2^.FutureValue))
     return $ case res of
         [(Value (Just a), Value (Just b), Value (Just c))] -> Just (fromRational a, fromRational b, fromRational c)
         _ -> Nothing
