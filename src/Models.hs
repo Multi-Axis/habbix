@@ -120,7 +120,7 @@ Future
     deriving Show
 
 -- like 'y = threshold' lines in graphs
-Threshold
+Threshold json
     item        ItemFutureId    sql=itemid
     lower       Bool
     high        Double
@@ -129,7 +129,7 @@ Threshold
     deriving Show
 
 -- attach pretty names (cpu, mem) to zabbix items
-Metric
+Metric json
     name        Text
     key_        Text
     scale       Double

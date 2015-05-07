@@ -84,6 +84,7 @@ data Program = Hosts     { config :: String, outType :: DataOutType }
              | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String, outCombine :: Bool }
              | Compare   { config :: String, outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
              | Dashboard { config :: String, outType :: DataOutType, cached :: Bool }
+             | Th        { config :: String, outType :: DataOutType }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON | OutSQL
@@ -131,6 +132,8 @@ prgConf = modes
                 } &= help "Compare predictions from knowing A to an actual history B"
     , Dashboard { cached = True &= help "Use cached version"
                 } &= help "Print dashboard-y information"
+
+    , Th        { } &= help "Print or set threshold values"
     ] &= program "habbix" &= verbosity
 
 main :: IO ()
@@ -162,6 +165,9 @@ main = do
         Models{..}    -> out =<< runLocalDB (P.selectList [] [P.Asc FutureModelId])
         MigrateDb{..} -> runLocalDB $ E.runMigration migrateAll >> mapM_ P.insertUnique defaultMetricNames
         Dashboard{..} -> liftIO . BLC.putStrLn . encode =<< if cached then getDashboardCached else getDashboard dashboardConfig
+
+        Th{..} -> out =<< runLocalDB selectThresholds
+
         Sync{..}      -> do
             when syncAll (populateZabbixParts >> populateDefaultFutures)
             case itemsToSync of
@@ -169,6 +175,7 @@ main = do
                 is -> executeFutures' (Just $ map toSqlKey is)
             logInfoN "Now rebuilding the dashboard"
             void $ getDashboard dashboardConfig
+
         Configure{..}
             | not (null executable) -> do
                 dir <- asks modelsDir
@@ -234,6 +241,11 @@ class Out t where
     -- | Output SQL INSERT'S
     outSQL   :: t -> BLC.ByteString
     outSQL _ = "SQL output not implemented for this case"
+
+instance Out [(Entity Metric, Entity Threshold)] where
+    outJSON = toJSON . map p where
+        p (Entity _ metric, Entity thresholdId threshold) = object
+            [ "threshold" .= threshold, "thresholdId" .= thresholdId, "metric" .= metric ]
 
 instance Out [Entity Host] where
     outJSON = toJSON . map p where

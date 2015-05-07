@@ -25,7 +25,7 @@ module Query
     selectHistoryMax, selectZabTrendItem,
     
     -- * Future
-    newItemFuture,
+    newItemFuture, selectThresholds,
 
     -- * Populate from remote
     populateZabbixParts, populateDefaultFutures, populateAll,
@@ -54,7 +54,7 @@ import           Data.Text (Text)
 import qualified Data.Aeson as A
 
 -- | avg_, max_, min_ etc
-type AggregateFunction = (Esqueleto query expr backend, PersistField a) => expr (Value a) -> expr (Value (Maybe a))
+type AggregateFunction = forall query expr backend a. (Esqueleto query expr backend, PersistField a) => expr (Value a) -> expr (Value (Maybe a))
 
 currentTimestampSql = unsafeSqlValue "EXTRACT(EPOCH FROM current_timestamp)"
 
@@ -172,6 +172,13 @@ selectAggregatedValues aggFun item itemfuture = do
     return $ case res of
         [(Value (Just a), Value (Just b), Value (Just c))] -> Just (fromRational a, fromRational b, fromRational c)
         _ -> Nothing
+
+selectThresholds :: DB [(Entity Metric, Entity Threshold)]
+selectThresholds = select $ from $ \(threshold `InnerJoin` itemFuture `InnerJoin` item `InnerJoin` metric) -> do
+    on (metric^.MetricKey_ ==. item^.ItemKey_)
+    on (item^.ItemId ==. itemFuture^.ItemFutureItem)
+    on (itemFuture^.ItemFutureId ==. threshold^.ThresholdItem)
+    return (metric, threshold)
 
 -- * History data points
 
