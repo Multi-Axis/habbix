@@ -84,7 +84,7 @@ data Program = Hosts     { config :: String, outType :: DataOutType }
              | Execute   { config :: String, outType :: DataOutType, argid :: Int64, params :: String, outCombine :: Bool }
              | Compare   { config :: String, outType :: DataOutType, argid :: Int64, fromInterval :: (Epoch, Epoch), toInterval :: (Epoch, Epoch) }
              | Dashboard { config :: String, outType :: DataOutType, cached :: Bool }
-             | Th        { config :: String, outType :: DataOutType, update :: Bool, metric :: Maybe String, critical :: Double, warning :: Double, high :: Double, lower :: Bool }
+             | Th        { config :: String, outType :: DataOutType, update :: Bool, metric :: Maybe String, critical :: Maybe Double, warning :: Maybe Double, high :: Maybe Double, lower :: Maybe Bool }
              deriving (Show, Data, Typeable)
 
 data DataOutType = OutHuman | OutJSON | OutSQL
@@ -135,10 +135,10 @@ prgConf = modes
 
     , Th        { update   = False &= help "Make changes in the database"
                 , metric   = Nothing &= help "Which metric to operate on"
-                , lower    = False &= help "Are the threshold lower bounds (default: upper)"
-                , critical = def &= help "critical threshold"
-                , warning  = def &= help "warning threshold"
-                , high     = def &= help "high threshold"
+                , lower    = Nothing &= help "Are the threshold lower bounds (default: upper)"
+                , critical = Nothing &= help "critical threshold"
+                , warning  = Nothing &= help "warning threshold"
+                , high     = Nothing &= help "high threshold"
                 } &= help "Print or set threshold values"
     ] &= program "habbix" &= verbosity
 
@@ -173,7 +173,7 @@ main = do
         Dashboard{..} -> liftIO . BLC.putStrLn . encode =<< if cached then getDashboardCached else getDashboard dashboardConfig
 
         Th{..}        -> do
-            liftIO $ print critical
+            when update $ runLocalDB $ updateThresholds (pack $ fromJust metric) lower warning high critical
             out =<< runLocalDB (selectThresholds $ fmap pack metric)
 
         Sync{..}      -> do
